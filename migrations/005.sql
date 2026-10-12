@@ -1,0 +1,13 @@
+ALTER TABLE users ADD CONSTRAINT user_identity_check CHECK(identity IN ('unverified','in_progress','verified','rejected','reverify'));
+ALTER TABLE shipments ADD CONSTRAINT shipment_state_check CHECK(status IN ('draft','awaiting_payment','published','assigned','pickup_arrived','picked_up','in_transit','destination_arrived','awaiting_receipt','received','completed','cancelled','delivery_failed','return_agreed','returning','returned'));
+ALTER TABLE shipments ADD CONSTRAINT participants_distinct_check CHECK(recipient_id IS NULL OR recipient_id<>sender_id);
+ALTER TABLE shipments ADD CONSTRAINT courier_recipient_check CHECK(courier_id IS NULL OR recipient_id IS NULL OR courier_id<>recipient_id);
+ALTER TABLE payments ADD CONSTRAINT payment_amount_check CHECK(amount>0);
+ALTER TABLE payouts ADD CONSTRAINT payout_amount_check CHECK(amount>0);
+ALTER TABLE refunds ADD CONSTRAINT refund_amount_check CHECK(amount>0);
+CREATE INDEX IF NOT EXISTS events_shipment_idx ON tracking_events(shipment_id,id);
+CREATE INDEX IF NOT EXISTS messages_shipment_idx ON messages(shipment_id,id);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id,id);
+CREATE INDEX IF NOT EXISTS disputes_shipment_idx ON disputes(shipment_id);
+CREATE INDEX IF NOT EXISTS reviews_target_idx ON reviews(target_id,role,publish_at);
+CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);

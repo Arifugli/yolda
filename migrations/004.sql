@@ -1,0 +1,2 @@
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS tracking_hash text UNIQUE;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS hidden boolean NOT NULL DEFAULT false;

@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS point_requests (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),shipment_id uuid REFERENCES shipments NOT NULL,locker_id text REFERENCES lockers NOT NULL,actor_id uuid REFERENCES users NOT NULL,operation text NOT NULL,endpoint text NOT NULL,event_id text UNIQUE NOT NULL,status text NOT NULL DEFAULT 'pending',created_at timestamptz DEFAULT now(),confirmed_at timestamptz);
+CREATE UNIQUE INDEX IF NOT EXISTS point_request_pending_idx ON point_requests(shipment_id,operation,endpoint) WHERE status='pending';
