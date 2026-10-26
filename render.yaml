@@ -1,0 +1,40 @@
+# Import this repository as a Render Blueprint. Supply secrets through the Render UI.
+# Supabase provides the database and private objects; Render runs the Next.js server.
+services:
+  - type: web
+    name: yolda-mvp
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: APP_MODE
+        value: demo
+      - key: DEPLOYMENT_ENV
+        value: development
+      - key: STORAGE_DRIVER
+        value: supabase
+      - key: SUPABASE_URL
+        value: https://kmpkfgenbomkbdzwpfbx.supabase.co
+      - key: SUPABASE_STORAGE_BUCKET
+        value: yolda-private
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DB_POOL_MAX
+        value: "5"
+      - key: DEMO_ACCESS_USER
+        value: demo
+      - key: DEMO_ACCESS_PASSWORD
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: APP_ENCRYPTION_KEY
+        sync: false

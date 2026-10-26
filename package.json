@@ -11,6 +11,9 @@
     "db:seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
     "test": "tsx --env-file-if-exists=.env --test tests/*.test.ts",
     "storage:prepare": "tsx --env-file-if-exists=.env scripts/storage.ts",
+    "supabase:check": "tsx --env-file-if-exists=.env scripts/supabase-check.ts",
+    "supabase:preflight": "tsx --env-file-if-exists=.env scripts/supabase-preflight.ts",
+    "supabase:sql": "tsx scripts/supabase-sql.ts",
     "storage:dev": "tsx --env-file-if-exists=.env scripts/object-store.ts",
     "test:e2e": "playwright test",
     "cloud:compose": "tsx scripts/cloud-compose.ts"
@@ -18,7 +21,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1149.0",
     "@fontsource/manrope": "^5.3.0",
-    "next": "16.4.0",
+    "leaflet": "^1.9.4",
+    "next": "16.4.3",
     "pg": "8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -27,6 +31,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",
+    "@types/leaflet": "^1.9.20",
     "@types/node": "^24",
     "@types/pg": "^8",
     "@types/react": "^19",

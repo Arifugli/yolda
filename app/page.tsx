@@ -1,6 +1,9 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
 import { uz, statusLabels } from "@/lib/i18n";
+import Mobility from "./mobility";
+import TaxiAvailability from "./taxi-availability";
+import { serviceLabels, type ServiceKind } from "@/lib/mobility-catalog";
 type Any = Record<string, any>;
 const enumLabels: Record<string, string> = {
   paid: "Оплачено",
@@ -172,6 +175,8 @@ export default function App() {
     [ready, setReady] = useState(false),
     [online, setOnline] = useState(true),
     [receive, setReceive] = useState(false);
+  const [serviceKind, setServiceKind] = useState<ServiceKind>("taxi");
+  const [serviceRequestId, setServiceRequestId] = useState<string | null>(null);
   const t = (s: string) => {
     const label = enumLabels[s] ?? s;
     return lang === "uz"
@@ -268,6 +273,7 @@ export default function App() {
   const tabs = [
     ["home", "home", "Главная"],
     ["nearby", "pin", "Заказы рядом"],
+    ["services", "route", "Услуги"],
     ["orders", "box", "Мои доставки"],
     ["messages", "chat", "Сообщения"],
     ["profile", "user", "Профиль"],
@@ -403,6 +409,17 @@ export default function App() {
           </div>
         )}
         <div className="content">
+          <TaxiAvailability
+            api={api}
+            t={t}
+            open={(id) => {
+              setServiceKind("taxi");
+              setServiceRequestId(id);
+              setTab("services");
+              setCreating(false);
+              setSelected(null);
+            }}
+          />
           {creating ? (
             <Create
               t={t}
@@ -487,6 +504,28 @@ export default function App() {
                     <RouteArt t={t} />
                   </section>
                   <div className="action-grid">
+                    {(Object.keys(serviceLabels) as ServiceKind[]).map(
+                      (kind) => (
+                        <button
+                          className="action-card"
+                          key={kind}
+                          onClick={() => {
+                            setServiceKind(kind);
+                            setServiceRequestId(null);
+                            setTab("services");
+                          }}
+                        >
+                          <span className="action-icon mint">
+                            <Icon name="route" size={26} />
+                          </span>
+                          <div>
+                            <h3>{t(serviceLabels[kind])}</h3>
+                            <p>{t("Заказать или стать исполнителем")}</p>
+                          </div>
+                          <Icon name="arrow" size={19} />
+                        </button>
+                      ),
+                    )}
                     <button
                       className="action-card"
                       onClick={() => setCreating(true)}
@@ -611,6 +650,40 @@ export default function App() {
                   create={() => setCreating(true)}
                   user={user}
                 />
+              )}
+              {tab === "services" && (
+                <>
+                  <div
+                    className="service-tabs"
+                    role="group"
+                    aria-label={t("Направление услуг")}
+                  >
+                    {(Object.keys(serviceLabels) as ServiceKind[]).map(
+                      (kind) => (
+                        <button
+                          key={kind}
+                          className={
+                            serviceKind === kind ? "button" : "button secondary"
+                          }
+                          onClick={() => {
+                            setServiceKind(kind);
+                            setServiceRequestId(null);
+                          }}
+                        >
+                          {t(serviceLabels[kind])}
+                        </button>
+                      ),
+                    )}
+                  </div>
+                  <Mobility
+                    key={serviceKind + ":" + (serviceRequestId ?? "")}
+                    initialId={serviceRequestId}
+                    kind={serviceKind}
+                    user={user}
+                    api={api}
+                    t={t}
+                  />
+                </>
               )}
               {tab === "nearby" && (
                 <Nearby

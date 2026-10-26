@@ -1,4 +1,5 @@
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { type BrowserContext, type Page } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { pool } from "../../lib/db";
 async function login(page: Page, i: number) {
   await page.goto("/");
@@ -36,9 +37,6 @@ test.beforeAll(async ({ request }) => {
     await pool.query("DELETE FROM rate_limits WHERE key=$1", [
       "otp:+99890000000" + i,
     ]);
-});
-test.afterAll(async () => {
-  await pool.end();
 });
 test("Полный пользовательский цикл в браузере, чат и отзыв", async ({
   browser,

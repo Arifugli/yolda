@@ -7,6 +7,8 @@ import {
 } from "@aws-sdk/client-s3";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { prepareSupabaseStorage, supabaseLoad, supabaseStore } from "./supabase-storage";
+const useSupabase = () => process.env.STORAGE_DRIVER === "supabase";
 const useS3 = () => process.env.STORAGE_DRIVER === "s3";
 const bucket = () => process.env.S3_BUCKET ?? "yolda-private";
 function client() {
@@ -23,6 +25,7 @@ function client() {
   });
 }
 export async function prepareStorage() {
+  if (useSupabase()) return prepareSupabaseStorage();
   if (!useS3()) return;
   const s3 = client();
   try {
@@ -35,6 +38,7 @@ export async function prepareStorage() {
   }
 }
 export async function store(id: string, bytes: Buffer, mime: string) {
+  if (useSupabase()) return supabaseStore(id, bytes, mime);
   if (useS3()) {
     await client().send(
       new PutObjectCommand({
@@ -58,6 +62,7 @@ export async function store(id: string, bytes: Buffer, mime: string) {
   });
 }
 export async function load(id: string) {
+  if (useSupabase()) return supabaseLoad(id);
   if (useS3()) {
     const r = await client().send(
       new GetObjectCommand({ Bucket: bucket(), Key: id }),

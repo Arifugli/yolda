@@ -1757,3 +1757,24 @@ input[type="file"] {
   height: 100%;
   object-fit: cover;
 }
+.service-tabs, .service-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
+.service-detail { padding: 24px; margin: 18px 0; }
+.service-detail h2, .service-card h3 { margin: 12px 0; }
+.service-detail p, .service-card p { margin: 10px 0; overflow-wrap: anywhere; }
+.service-note { color: #68766f; max-width: 850px; line-height: 1.6; }
+.service-card { text-align: left; padding: 22px; cursor: pointer; color: inherit; min-width: 0; }
+.service-card:hover { border-color: #176e58; }
+.service-offer { display: flex; gap: 20px; justify-content: space-between; align-items: center; padding: 18px 0; border-top: 1px solid #e5e9e3; }
+.service-consent { display: flex; align-items: flex-start; gap: 12px; margin: 20px 0; line-height: 1.5; }
+.service-consent input { width: 20px; height: 20px; flex-shrink: 0; margin: 2px 0; }
+.service-chat { max-height: 300px; overflow: auto; }
+.taxi-map { height: 320px; width: 100%; border-radius: 16px; isolation: isolate; }
+.taxi-availability > summary { cursor: pointer; font-weight: 700; }
+.taxi-availability label { max-width: 650px; }
+.taxi-map-panel { margin: 20px 0; }
+.mobility form .button { margin-top: 12px; }
+@media (max-width: 800px) {
+  .service-detail { padding: 16px; }
+  .service-offer { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .mobile-nav button span { font-size: 9px; }
+}

@@ -11,4 +11,4 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build && mkdir -p storage/objects && chown -R node:node storage .next
 USER node
 EXPOSE 3000
-CMD ["sh", "-c", "npm run db:migrate && npm run storage:prepare && npm run db:seed && npm start"]
+CMD ["sh", "scripts/start-cloud.sh"]

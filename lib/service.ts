@@ -20,6 +20,7 @@ import {
   assertDemo,
 } from "./providers";
 import { z } from "zod";
+import { mobilityMutate } from "./mobility";
 export type Shipment = {
   id: string;
   sender_id: string;
@@ -173,6 +174,8 @@ async function execute(
   id: string | undefined,
   b: any,
 ): Promise<any> {
+  if (action.startsWith("mobility."))
+    return mobilityMutate(db, u, action.slice("mobility.".length), id, b);
   if (action === "verify") {
     const result = await identityProvider.verify({ userId: u.id, dob: u.dob });
     await db.query(

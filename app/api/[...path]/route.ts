@@ -24,6 +24,12 @@ import { store, load } from "@/lib/storage";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { codeDigest } from "@/lib/secure-cache";
+import {
+  mobilityList,
+  mobilityDetail,
+  mobilityVehicles,
+  mobilityPresence,
+} from "@/lib/mobility";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ path: string[] }> };
@@ -159,7 +165,9 @@ async function handle(req: NextRequest, ctx: Context) {
       res.cookies.set("yolda_session", result.session, {
         httpOnly: true,
         sameSite: "lax",
-        secure: req.nextUrl.protocol === "https:",
+        secure:
+          process.env.APP_ORIGIN?.startsWith("https://") ||
+          req.nextUrl.protocol === "https:",
         path: "/",
         maxAge: 604800,
       });
@@ -182,6 +190,38 @@ async function handle(req: NextRequest, ctx: Context) {
       req.cookies.get("yolda_session")?.value ?? null,
     );
     if (post) await rate("write:" + u.id, 120, 60);
+    if (path[0] === "mobility") {
+      if (!post) {
+        if (path.length === 1)
+          return json(await mobilityList(u, req.nextUrl.searchParams));
+        if (path.length === 2 && path[1] === "vehicles")
+          return json(await mobilityVehicles(u));
+        if (path.length === 2 && path[1] === "presence")
+          return json(await mobilityPresence(u));
+        if (path.length === 2) return json(await mobilityDetail(u, path[1]));
+        throw new AppError(404, "Не найдено");
+      }
+      const vehicle = path.length === 2 && path[1] === "vehicles";
+      const special =
+        path.length === 2 && ["presence", "quote"].includes(path[1])
+          ? path[1]
+          : null;
+      if (!(path.length === 1 || vehicle || special || path.length === 3))
+        throw new AppError(404, "Не найдено");
+      const result = await mutate(
+        u,
+        "mobility." +
+          (vehicle
+            ? "vehicle"
+            : (special ?? (path.length === 1 ? "create" : path[2]))),
+        path.length === 3 ? path[1] : undefined,
+        body(),
+        req.headers.get("idempotency-key") ?? "",
+      );
+      return result.rejected
+        ? json({ error: result.message }, 400)
+        : json(result);
+    }
     if (endpoint === "auth/logout" && post) {
       await pool.query("DELETE FROM sessions WHERE token_hash=$1", [
         hash(req.cookies.get("yolda_session")!.value),

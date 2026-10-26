@@ -3,6 +3,7 @@ node_modules
 .git
 .env*
 !.env.example
+!.env.supabase.example
 storage
 artifacts
 test-results
