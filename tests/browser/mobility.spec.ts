@@ -16,7 +16,7 @@ async function login(page: Page, i: number) {
 }
 async function services(page: Page, kind = "Такси") {
   await page
-    .getByRole("button", { name: "Услуги", exact: true })
+    .getByRole("button", { name: "Исполнителям", exact: true })
     .first()
     .click();
   await page.getByRole("button", { name: kind, exact: true }).click();
@@ -47,7 +47,9 @@ async function startAndFinish(customer: Page, driver: Page, taxi: boolean) {
   await customer
     .getByRole("button", { name: "Получить код начала", exact: true })
     .click({ timeout: 15000 });
-  const code = await customer.locator(".handover-code strong").innerText();
+  const code = await customer
+    .locator(taxi ? ".booking-code strong" : ".handover-code strong")
+    .innerText();
   await driver
     .getByLabel("Код начала от заказчика", { exact: true })
     .fill(code);
@@ -61,12 +63,20 @@ async function startAndFinish(customer: Page, driver: Page, taxi: boolean) {
     .getByRole("button", { name: "Сообщить о выполнении", exact: true })
     .click({ timeout: 15000 });
   await customer
-    .getByRole("button", { name: "Подтвердить выполнение", exact: true })
+    .getByRole("button", {
+      name: taxi ? "Завершить поездку" : "Подтвердить выполнение",
+      exact: true,
+    })
     .click({ timeout: 15000 });
-  await expect(customer.locator(".service-detail .pill")).toHaveText(
-    "Завершён",
-    { timeout: 15000 },
-  );
+  if (taxi)
+    await expect(
+      customer.getByRole("heading", { name: "Поездка завершена", exact: true }),
+    ).toBeVisible();
+  else
+    await expect(customer.locator(".service-detail .pill")).toHaveText(
+      "Завершён",
+      { timeout: 15000 },
+    );
 }
 test.beforeEach(async () => {
   for (let i = 0; i < 3; i++)
@@ -81,6 +91,14 @@ test.afterAll(async () => {
       [prefix + "%"],
     )
   ).rows.map((r) => r.id);
+  ids.push(
+    ...(
+      await pool.query(
+        "SELECT r.id FROM service_requests r JOIN service_vehicles v ON v.id=r.vehicle_id WHERE v.data->>'name' LIKE $1",
+        [prefix + "%"],
+      )
+    ).rows.map((r) => r.id),
+  );
   await pool.query("DELETE FROM service_requests WHERE id=ANY($1::uuid[])", [
     ids,
   ]);
@@ -96,7 +114,10 @@ test("Такси в браузере: карта, геопозиция води�
   browser,
 }) => {
   test.setTimeout(120000);
-  const a = await browser.newContext(),
+  const a = await browser.newContext({
+      permissions: ["geolocation"],
+      geolocation: { latitude: 40.386, longitude: 71.786, accuracy: 10 },
+    }),
     b = await browser.newContext({
       permissions: ["geolocation"],
       geolocation: { latitude: 40.386, longitude: 71.787, accuracy: 10 },
@@ -107,6 +128,22 @@ test("Такси в браузере: карта, геопозиция води�
   customer.on("pageerror", (e) => errors.push(e.message));
   driver.on("pageerror", (e) => errors.push(e.message));
   try {
+    await customer.route("**/api/places?**", async (route) => {
+      const url = new URL(route.request().url());
+      await route.fulfill({
+        json: [
+          {
+            lat: url.searchParams.get("mode") === "reverse" ? 40.386 : 40.4,
+            lng: url.searchParams.get("mode") === "reverse" ? 71.786 : 71.8,
+            address:
+              url.searchParams.get("mode") === "reverse"
+                ? "Тестовый дом 12"
+                : "Тестовый вокзал 24",
+            city: "Фергана",
+          },
+        ],
+      });
+    });
     await login(customer, 0);
     await login(driver, 1);
     await services(driver);
@@ -125,40 +162,33 @@ test("Такси в браузере: карта, геопозиция води�
     await expect(availability.locator("summary")).toContainText("На линии", {
       timeout: 15000,
     });
-    await services(customer);
+    await customer.getByRole("button", { name: "Такси", exact: true }).click();
+    await expect(
+      customer.getByRole("button", {
+        name: "Изменить место подачи",
+        exact: true,
+      }),
+    ).toContainText("Тестовый дом 12");
     await customer
-      .getByRole("button", { name: "Заказать поездку", exact: true })
+      .getByRole("button", { name: "Выбрать пункт назначения", exact: true })
       .click();
     await customer
-      .getByLabel("Откуда", { exact: true })
-      .fill("Тестовый дом 12");
+      .getByRole("textbox", { name: "Поиск адреса", exact: true })
+      .fill("Тестовый вокзал");
     await customer
-      .getByLabel("Куда", { exact: true })
-      .fill("Тестовый вокзал 24");
-    await customer
-      .getByLabel("Пожелания к поездке", { exact: true })
-      .fill(prefix + "-taxi");
-    await customer.getByText("Координаты точек", { exact: true }).click();
-    await customer.getByLabel("origin lat", { exact: true }).fill("40.386");
-    await customer.getByLabel("origin lng", { exact: true }).fill("71.786");
-    await customer.getByLabel("destination lat", { exact: true }).fill("40.4");
-    await customer.getByLabel("destination lng", { exact: true }).fill("71.8");
-    await customer
-      .getByRole("button", { name: "Рассчитать стоимость", exact: true })
+      .getByRole("button", { name: "Найти адрес", exact: true })
       .click();
-    await expect(customer.getByRole("status")).toContainText(
-      "Стоимость поездки",
-    );
-    await customer
-      .getByRole("checkbox", { name: /Согласую безопасную посадку/ })
-      .check();
-    await customer
-      .getByRole("button", { name: "Опубликовать заявку", exact: true })
-      .click();
-    await expect(customer.locator(".service-detail .pill")).toHaveText(
-      "Ожидаем ответа водителя",
-      { timeout: 15000 },
-    );
+    await customer.locator(".address-results button").first().click();
+    await expect(
+      customer.getByRole("button", { name: /Заказать такси/ }),
+    ).toBeEnabled();
+    await customer.getByRole("button", { name: /Заказать такси/ }).click();
+    await expect(
+      customer.getByRole("heading", {
+        name: "Водитель подтверждает поездку",
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 15000 });
     await driver
       .getByRole("button", { name: "Открыть поездку", exact: true })
       .click({ timeout: 15000 });

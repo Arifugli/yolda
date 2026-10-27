@@ -31,6 +31,7 @@ export default function TaxiMap({
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
           maxZoom: 19,
+            referrerPolicy: "strict-origin-when-cross-origin",
         }).addTo(m);
         m.on("click", (e: import("leaflet").LeafletMouseEvent) => {
           const key = currentTarget.current;

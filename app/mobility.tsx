@@ -11,6 +11,7 @@ import {
 import TaxiMap, { type TaxiPoints } from "./taxi-map";
 type Row = Record<string, any>;
 type Props = {
+  onBookTaxi?: () => void;
   user: Row;
   kind: ServiceKind;
   initialId?: string | null;
@@ -30,7 +31,14 @@ const when = (s: string) =>
     timeStyle: "short",
     timeZone: "Asia/Tashkent",
   }).format(new Date(s));
-export default function Mobility({ user, kind, initialId, api, t }: Props) {
+export default function Mobility({
+  user,
+  kind,
+  initialId,
+  api,
+  t,
+  onBookTaxi,
+}: Props) {
   const [view, setView] = useState("mine"),
     [rows, setRows] = useState<Row[]>([]),
     [vehicles, setVehicles] = useState<Row[]>([]);
@@ -115,7 +123,12 @@ export default function Mobility({ user, kind, initialId, api, t }: Props) {
           <p>{t("Закажите услугу или выполняйте заявки на своей машине.")}</p>
         </div>
         {!creating && !selected && (
-          <button className="button" onClick={() => setCreating(true)}>
+          <button
+            className="button"
+            onClick={() =>
+              kind === "taxi" && onBookTaxi ? onBookTaxi() : setCreating(true)
+            }
+          >
             {t(kind === "taxi" ? "Заказать поездку" : "Создать заявку")}
           </button>
         )}

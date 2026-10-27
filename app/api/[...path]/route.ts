@@ -18,11 +18,13 @@ import {
   mutate,
   nearby,
   participant,
+  claimQuickDeliveries,
 } from "@/lib/service";
 import { rate } from "@/lib/rate";
 import { store, load } from "@/lib/storage";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
+import { geocode } from "@/lib/geocoding";
 import { codeDigest } from "@/lib/secure-cache";
 import {
   mobilityList,
@@ -153,6 +155,7 @@ async function handle(req: NextRequest, ctx: Context) {
             )
           ).rows[0];
         await db.query("DELETE FROM otp WHERE phone=$1", [b.phone]);
+        await claimQuickDeliveries(db, user);
         const session = token();
         await db.query(
           "INSERT INTO sessions VALUES($1,$2,now()+interval '7 days')",
@@ -190,6 +193,10 @@ async function handle(req: NextRequest, ctx: Context) {
       req.cookies.get("yolda_session")?.value ?? null,
     );
     if (post) await rate("write:" + u.id, 120, 60);
+    if (endpoint === "places" && !post) {
+      await rate("places:" + u.id, 30, 60);
+      return json(await geocode(req.nextUrl.searchParams));
+    }
     if (path[0] === "mobility") {
       if (!post) {
         if (path.length === 1)

@@ -21,6 +21,11 @@ import {
 } from "./providers";
 import { z } from "zod";
 import { mobilityMutate } from "./mobility";
+import {
+  deliveryBookingSchema,
+  deliveryInput,
+  deliveryQuote,
+} from "./delivery-booking";
 export type Shipment = {
   id: string;
   sender_id: string;
@@ -167,6 +172,16 @@ export async function mutate(
     return result;
   });
 }
+export async function claimQuickDeliveries(db: PoolClient, u: User) {
+  if (!u.phone_verified || u.restricted) return;
+  const rows = (
+    await db.query(
+      "UPDATE shipments SET recipient_id=$1,invite_hash=NULL WHERE recipient_id IS NULL AND data->>'quickOrder'='true' AND data->>'recipient'=$2 AND sender_id<>$1 AND courier_id IS DISTINCT FROM $1 RETURNING id",
+      [u.id, u.phone],
+    )
+  ).rows;
+  for (const row of rows) await audit(db, u, "recipient.phone.claim", row.id);
+}
 async function execute(
   db: PoolClient,
   u: User,
@@ -176,6 +191,49 @@ async function execute(
 ): Promise<any> {
   if (action.startsWith("mobility."))
     return mobilityMutate(db, u, action.slice("mobility.".length), id, b);
+  if (action === "delivery.quote")
+    return deliveryQuote(
+      b,
+      (await db.query("SELECT data FROM settings WHERE id=1")).rows[0].data,
+    );
+  if (action === "delivery.book") {
+    await verified(db, u);
+    const input = deliveryBookingSchema.parse(b),
+      quote = deliveryQuote(
+        input,
+        (await db.query("SELECT data FROM settings WHERE id=1")).rows[0].data,
+      );
+    if (input.quotedPrice !== quote.price)
+      throw new AppError(
+        409,
+        "Стоимость изменилась. Проверьте цену и повторите заказ.",
+      );
+    const created = await execute(
+      db,
+      u,
+      "create",
+      undefined,
+      deliveryInput(input),
+    );
+    const createdPrice = (
+      await db.query(
+        "SELECT data->'price'->>'total' AS total FROM shipments WHERE id=$1",
+        [created.id],
+      )
+    ).rows[0].total;
+    if (Number(createdPrice) !== input.quotedPrice)
+      throw new AppError(
+        409,
+        "Стоимость изменилась. Проверьте цену и повторите заказ.",
+      );
+    await db.query(
+      "UPDATE shipments SET data=jsonb_set(data,'{quickOrder}','true') WHERE id=$1",
+      [created.id],
+    );
+    await execute(db, u, "pay", created.id, {});
+    await execute(db, u, "publish", created.id, {});
+    return { ...created, status: "published", price: quote.price };
+  }
   if (action === "verify") {
     const result = await identityProvider.verify({ userId: u.id, dob: u.dob });
     await db.query(
@@ -364,6 +422,11 @@ async function execute(
       throw new AppError(403, "Приглашение предназначено другому получателю");
     if (u.id === s.sender_id || u.id === s.courier_id)
       throw new AppError(403, "Нельзя привязать эту роль");
+    if (s.data.quickOrder && s.data.recipient !== u.phone)
+      throw new AppError(
+        403,
+        "Приглашение предназначено другому номеру телефона",
+      );
     await db.query(
       "UPDATE shipments SET recipient_id=$2,invite_hash=NULL WHERE id=$1",
       [s.id, u.id],
@@ -434,7 +497,11 @@ async function execute(
   if (action === "offer") {
     await verified(db, u);
     status(s, "published");
-    if (s.sender_id === u.id || s.recipient_id === u.id)
+    if (
+      s.sender_id === u.id ||
+      s.recipient_id === u.id ||
+      (s.data.quickOrder && s.data.recipient === u.phone)
+    )
       throw new AppError(403, "Нельзя доставлять свой заказ");
     if (u.profile.accepting !== true)
       throw new AppError(400, "Включите прием заказов");
@@ -449,6 +516,13 @@ async function execute(
       "INSERT INTO notifications(user_id,shipment_id,text) SELECT $1,$2,$3 FROM users WHERE id=$1 AND coalesce((profile->>'notifications')::boolean,true)",
       [s.sender_id, s.id, "Новый отклик курьера"],
     );
+    if (s.data.quickOrder) {
+      const sender = (
+        await db.query("SELECT * FROM users WHERE id=$1", [s.sender_id])
+      ).rows[0];
+      if (!sender.restricted)
+        await execute(db, sender, "assign", s.id, { courierId: u.id });
+    }
     return { ok: true };
   }
   if (action === "assign") {
@@ -457,7 +531,7 @@ async function execute(
     status(s, "published");
     if (
       s.payment_status !== "paid" ||
-      !s.recipient_id ||
+      (!s.recipient_id && !s.data.quickOrder) ||
       (s.data.payer === "recipient" && !s.recipient_consent)
     )
       throw new AppError(409, "Требуются получатель, согласие и оплата");
@@ -511,7 +585,7 @@ async function execute(
     owner(u, s);
     await verified(db, u);
     status(s, "draft", "awaiting_payment");
-    if (!s.recipient_id)
+    if (!s.recipient_id && !s.data.quickOrder)
       throw new AppError(
         409,
         "Получатель должен зарегистрироваться по приглашению",

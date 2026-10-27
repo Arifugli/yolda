@@ -1,8 +1,10 @@
 import { extraUz } from "./uz-extra";
 import { mobilityUz } from "./mobility-uz";
+import { consumerUz } from "./consumer-uz";
 export const uz: Record<string, string> = {
   ...extraUz,
   ...mobilityUz,
+  ...consumerUz,
   Главная: "Bosh sahifa",
   "Заказы рядом": "Yaqin buyurtmalar",
   "Мои доставки": "Yetkazmalarim",

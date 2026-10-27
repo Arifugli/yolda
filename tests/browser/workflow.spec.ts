@@ -53,8 +53,14 @@ test("Полный пользовательский цикл в браузере
   await login(courier, 1);
   await login(recipient, 2);
   await sender
-    .getByRole("button", { name: "Отправить посылку", exact: true })
+    .getByRole("button", { name: /^Мои доставки/ })
     .first()
+    .click();
+  await sender
+    .getByRole("button", {
+      name: "Подробное отправление · пункты и постаматы",
+      exact: true,
+    })
     .click();
   await sender
     .getByLabel("Адрес", { exact: true })
@@ -303,8 +309,14 @@ test("Повтор после потери ответа не создает вт
   const p = await ctx.newPage();
   await login(p, 0);
   await p
-    .getByRole("button", { name: "Отправить посылку", exact: true })
+    .getByRole("button", { name: /^Мои доставки/ })
     .first()
+    .click();
+  await p
+    .getByRole("button", {
+      name: "Подробное отправление · пункты и постаматы",
+      exact: true,
+    })
     .click();
   await p.getByLabel("Адрес", { exact: true }).nth(0).fill("Дом 12");
   await p.getByLabel("Адрес", { exact: true }).nth(1).fill("Дом 24");

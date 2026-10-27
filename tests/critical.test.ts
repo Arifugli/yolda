@@ -1,8 +1,14 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { pool } from "../lib/db";
-import { mutate, getShipment, nearby, adminAction } from "../lib/service";
+import { pool, transaction } from "../lib/db";
+import {
+  mutate,
+  getShipment,
+  nearby,
+  adminAction,
+  claimQuickDeliveries,
+} from "../lib/service";
 import { assertDemo, lockerProvider } from "../lib/providers";
 import type { User } from "../lib/auth";
 let sender: User,
@@ -117,6 +123,13 @@ before(async () => {
   ).rows[0];
 });
 after(async () => {
+  for (const row of (
+    await pool.query(
+      "SELECT id FROM shipments WHERE sender_id=ANY($1::uuid[])",
+      [ids],
+    )
+  ).rows)
+    if (!shipments.includes(row.id)) shipments.push(row.id);
   for (const table of ["reports", "messages"]) {
     if (table === "reports")
       await pool.query("DELETE FROM reports WHERE author_id=ANY($1::uuid[])", [
@@ -814,4 +827,125 @@ test("В production демонстрационный verified-статус не 
   } finally {
     process.env.APP_MODE = "demo";
   }
+});
+
+const quickRoute = () => ({
+  origin: input().origin,
+  destination: input().destination,
+  parcel: "small",
+  recipient: "+998900000002",
+  description: "Quick " + prefix + randomUUID(),
+  allowedContents: true,
+  packaging: true,
+});
+async function quickBook(body = quickRoute(), u = sender, key = randomUUID()) {
+  const quote = await call(u, "delivery.quote", undefined, body);
+  const payload = { ...body, quotedPrice: quote.price };
+  const result = await call(u, "delivery.book", undefined, payload, key);
+  shipments.push(result.id);
+  return { ...result, payload, key };
+}
+test("Короткий заказ доставки сразу готов к поиску и имеет ровно одну демо-оплату", async () => {
+  const s = await quickBook(),
+    detail = await getShipment(sender, s.id);
+  assert.equal(detail.status, "published");
+  assert.equal(detail.payment_status, "paid");
+  assert.equal(detail.data.quickOrder, true);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int n FROM payments WHERE shipment_id=$1",
+        [s.id],
+      )
+    ).rows[0].n,
+    1,
+  );
+});
+test("Повтор короткого заказа после потери ответа не дублирует заказ и оплату", async () => {
+  const s = await quickBook();
+  const replay = await call(
+    sender,
+    "delivery.book",
+    undefined,
+    s.payload,
+    s.key,
+  );
+  assert.equal(replay.id, s.id);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int n FROM shipments WHERE data->>'description'=$1",
+        [s.payload.description],
+      )
+    ).rows[0].n,
+    1,
+  );
+  await assert.rejects(
+    call(
+      sender,
+      "delivery.book",
+      undefined,
+      { ...s.payload, recipient: "+998900000003" },
+      s.key,
+    ),
+  );
+});
+test("Короткий заказ сохраняет проверку личности, упаковки, зоны и подтверждённой цены", async () => {
+  await pool.query("UPDATE users SET identity='unverified' WHERE id=$1", [
+    unverified.id,
+  ]);
+  const body = quickRoute(),
+    quote = await call(sender, "delivery.quote", undefined, body),
+    payload = { ...body, quotedPrice: quote.price };
+  await assert.rejects(call(unverified, "delivery.book", undefined, payload));
+  await assert.rejects(
+    call(sender, "delivery.book", undefined, { ...payload, packaging: false }),
+  );
+  await assert.rejects(
+    call(sender, "delivery.book", undefined, { ...payload, quotedPrice: 1000 }),
+  );
+  await assert.rejects(
+    call(sender, "delivery.quote", undefined, {
+      ...body,
+      origin: { ...body.origin, lat: 41.3, lng: 69.2 },
+    }),
+  );
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int n FROM shipments WHERE data->>'description'=$1",
+        [body.description],
+      )
+    ).rows[0].n,
+    0,
+  );
+});
+test("Первый подходящий отклик автоматически назначает курьера короткому заказу", async () => {
+  const s = await quickBook();
+  await call(courier, "offer", s.id);
+  assert.equal((await getShipment(sender, s.id)).courier_id, courier.id);
+  assert.equal((await getShipment(sender, s.id)).status, "assigned");
+  await assert.rejects(call(other, "offer", s.id));
+});
+test("Незарегистрированный получатель получает короткую доставку только после подтверждения своего телефона", async () => {
+  const phone = "+998" + String(Date.now()).slice(-9),
+    s = await quickBook({ ...quickRoute(), recipient: phone });
+  assert.equal((await getShipment(sender, s.id)).recipient_id, null);
+  await transaction((db) => claimQuickDeliveries(db, other));
+  assert.equal((await getShipment(sender, s.id)).recipient_id, null);
+  await assert.rejects(call(other, "claim", undefined, { invite: s.invite }));
+  const receiver = (
+    await pool.query(
+      "INSERT INTO users(name,phone,phone_verified,identity,dob) VALUES($1,$2,true,'verified','1990-01-01') RETURNING *",
+      [prefix + "phone-recipient", phone],
+    )
+  ).rows[0];
+  ids.push(receiver.id);
+  await transaction((db) => claimQuickDeliveries(db, receiver));
+  assert.equal((await getShipment(sender, s.id)).recipient_id, receiver.id);
+  assert.equal(
+    (await pool.query("SELECT invite_hash FROM shipments WHERE id=$1", [s.id]))
+      .rows[0].invite_hash,
+    null,
+  );
 });

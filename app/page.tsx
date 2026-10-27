@@ -2,6 +2,18 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { uz, statusLabels } from "@/lib/i18n";
 import Mobility from "./mobility";
+import ConsumerHome from "./consumer-home";
+import TripHistory from "./trip-history";
+import dynamic from "next/dynamic";
+const QuickBooking = dynamic(() => import("./quick-booking"), {
+  ssr: false,
+  loading: () => (
+    <div className="loading">
+      <p>Открываем карту…</p>
+    </div>
+  ),
+});
+import type { Place } from "@/lib/places";
 import TaxiAvailability from "./taxi-availability";
 import { serviceLabels, type ServiceKind } from "@/lib/mobility-catalog";
 type Any = Record<string, any>;
@@ -177,6 +189,13 @@ export default function App() {
     [receive, setReceive] = useState(false);
   const [serviceKind, setServiceKind] = useState<ServiceKind>("taxi");
   const [serviceRequestId, setServiceRequestId] = useState<string | null>(null);
+  const [pickup, setPickup] = useState<Place | null>(null);
+  const [booking, setBooking] = useState<{
+    kind: "taxi" | "delivery";
+    id?: string;
+    destination?: Place;
+  } | null>(null);
+  const [workKind, setWorkKind] = useState("delivery");
   const t = (s: string) => {
     const label = enumLabels[s] ?? s;
     return lang === "uz"
@@ -243,6 +262,13 @@ export default function App() {
   async function open(id: string) {
     const s = await run(() => api("shipments/" + id), "");
     if (s) {
+      if (
+        s.data.quickOrder &&
+        [s.sender_id, s.recipient_id].includes(user?.id)
+      ) {
+        setBooking({ kind: "delivery", id: s.id });
+        return;
+      }
       setSelected(s);
       setCreating(false);
     }
@@ -270,16 +296,51 @@ export default function App() {
     return (
       <Login name={name} t={t} lang={lang} setLang={setLang} done={reload} />
     );
+  if (booking)
+    return (
+      <QuickBooking
+        key={booking.kind + ":" + (booking.id ?? "new")}
+        kind={booking.kind}
+        name={name}
+        user={user}
+        api={api}
+        t={t}
+        initialPickup={pickup}
+        initialDestination={booking.destination}
+        initialId={booking.id}
+        onPickup={setPickup}
+        close={() => {
+          setBooking(null);
+          setTab("home");
+          void reload();
+        }}
+        details={async (id) => {
+          setBooking(null);
+          if (booking.kind === "taxi") {
+            setServiceKind("taxi");
+            setServiceRequestId(id);
+            setTab("services");
+          } else {
+            const s = await api("shipments/" + id);
+            setSelected(s);
+            setTab("orders");
+          }
+        }}
+      />
+    );
   const tabs = [
     ["home", "home", "Главная"],
-    ["nearby", "pin", "Заказы рядом"],
-    ["services", "route", "Услуги"],
     ["orders", "box", "Мои доставки"],
-    ["messages", "chat", "Сообщения"],
+    ["work", "route", "Исполнителям"],
     ["profile", "user", "Профиль"],
   ];
   return (
-    <div className="shell">
+    <div
+      className={
+        "shell" +
+        (tab === "home" && !selected && !creating ? " consumer-shell" : "")
+      }
+    >
       <aside className="sidebar">
         <a className="brand" href="/" aria-label={name}>
           <img src="/icon.svg" alt="" />
@@ -409,17 +470,45 @@ export default function App() {
           </div>
         )}
         <div className="content">
-          <TaxiAvailability
-            api={api}
-            t={t}
-            open={(id) => {
-              setServiceKind("taxi");
-              setServiceRequestId(id);
-              setTab("services");
-              setCreating(false);
-              setSelected(null);
-            }}
-          />
+          {tab === "work" && (
+            <>
+              <div
+                className="service-tabs"
+                aria-label={t("Услуги исполнителя")}
+              >
+                {[
+                  ["delivery", "Доставка"],
+                  ["taxi", "Такси"],
+                  ["cargo", "Грузоперевозки"],
+                  ["equipment", "Спецтехника"],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    className={workKind === id ? "button" : "button secondary"}
+                    onClick={() => {
+                      setWorkKind(id);
+                      setSelected(null);
+                      setServiceRequestId(null);
+                    }}
+                  >
+                    {t(label)}
+                  </button>
+                ))}
+              </div>
+              <div className={workKind === "taxi" ? "" : "driver-panel-hidden"}>
+                <TaxiAvailability
+                  api={api}
+                  t={t}
+                  open={(id) => {
+                    setWorkKind("taxi");
+                    setServiceRequestId(id);
+                    setSelected(null);
+                    setCreating(false);
+                  }}
+                />
+              </div>
+            </>
+          )}
           {creating ? (
             <Create
               t={t}
@@ -446,210 +535,70 @@ export default function App() {
           ) : (
             <>
               {tab === "home" && (
-                <>
-                  <div className="eyebrow">
-                    {lang === "ru"
-                      ? "ДОСТАВКА, КОТОРАЯ ОБЪЕДИНЯЕТ"
-                      : "BIRLASHTIRUVCHI YETKAZISH"}
-                  </div>
-                  <div className="page-title">
-                    <div>
-                      <h1>{t("Куда отправимся сегодня?")}</h1>
-                      <p>
-                        {lang === "ru"
-                          ? `${user.name.split(" ")[0]}, у каждой посылки есть свой попутчик.`
-                          : `${user.name.split(" ")[0]}, har bir jo‘natmaning yo‘ldoshi bor.`}
-                      </p>
-                    </div>
-                    <span className="date">
-                      {new Intl.DateTimeFormat(lang === "ru" ? "ru" : "uz", {
-                        day: "numeric",
-                        month: "long",
-                        timeZone: "Asia/Tashkent",
-                      }).format(new Date())}
-                    </span>
-                  </div>
-                  <section className="hero">
-                    <div className="hero-copy">
-                      <span className="pill light">
-                        {t("Помогайте друг другу по пути")}
-                      </span>
-                      <h2>
-                        {lang === "ru" ? (
-                          <>
-                            {t("Вам по пути.")} <br />
-                            {t("Посылке — по адресу.")}{" "}
-                          </>
-                        ) : (
-                          <>
-                            Sizga yo‘l-yo‘lakay.
-                            <br />
-                            Jo‘natma manziliga.
-                          </>
-                        )}
-                      </h2>
-                      <p>
-                        {lang === "ru"
-                          ? "Отправляйте важное с людьми, которые уже едут в нужную сторону. Просто, удобно, вместе."
-                          : "Kerakli tomonga ketayotgan odamlar bilan jo‘natmalaringizni yuboring. Qulay va birgalikda."}
-                      </p>
-                      <button
-                        className="button white"
-                        onClick={() => setCreating(true)}
-                      >
-                        {t("Отправить посылку")}
-                        <Icon name="arrow" size={19} />
-                      </button>
-                    </div>
-                    <RouteArt t={t} />
-                  </section>
-                  <div className="action-grid">
-                    {(Object.keys(serviceLabels) as ServiceKind[]).map(
-                      (kind) => (
-                        <button
-                          className="action-card"
-                          key={kind}
-                          onClick={() => {
-                            setServiceKind(kind);
-                            setServiceRequestId(null);
-                            setTab("services");
-                          }}
-                        >
-                          <span className="action-icon mint">
-                            <Icon name="route" size={26} />
-                          </span>
-                          <div>
-                            <h3>{t(serviceLabels[kind])}</h3>
-                            <p>{t("Заказать или стать исполнителем")}</p>
-                          </div>
-                          <Icon name="arrow" size={19} />
-                        </button>
-                      ),
-                    )}
-                    <button
-                      className="action-card"
-                      onClick={() => setCreating(true)}
-                    >
-                      <span className="action-icon peach">
-                        <Icon name="box" size={26} />
-                      </span>
-                      <div>
-                        <h3>{t("Отправить посылку")}</h3>
-                        <p>
-                          {lang === "ru"
-                            ? "От двери до двери — в надежных руках"
-                            : "Eshikdan eshikkacha yetkazish"}
-                        </p>
-                      </div>
-                      <Icon name="arrow" size={19} />
-                    </button>
-                    <button
-                      className="action-card"
-                      onClick={() => setTab("nearby")}
-                    >
-                      <span className="action-icon mint">
-                        <Icon name="route" size={26} />
-                      </span>
-                      <div>
-                        <h3>{t("Доставить по пути")}</h3>
-                        <p>
-                          {lang === "ru"
-                            ? "Ваш маршрут может приносить доход"
-                            : "Yo‘nalishingiz daromad keltiradi"}
-                        </p>
-                      </div>
-                      <Icon name="arrow" size={19} />
-                    </button>
-                    <button
-                      className="action-card"
-                      onClick={() => setReceive(true)}
-                    >
-                      <span className="action-icon lavender">
-                        <Icon name="pin" size={26} />
-                      </span>
-                      <div>
-                        <h3>{t("Получить посылку")}</h3>
-                        <p>
-                          {lang === "ru"
-                            ? "Примите приглашение отправителя"
-                            : "Yuboruvchining taklifini qabul qiling"}
-                        </p>
-                      </div>
-                      <Icon name="arrow" size={19} />
-                    </button>
-                  </div>
-                  <div className="section-heading">
-                    <h2>
-                      {t("Активные доставки")}{" "}
-                      <span className="count-label">
-                        {
-                          orders.filter(
-                            (o) =>
-                              !["completed", "cancelled", "returned"].includes(
-                                o.status,
-                              ),
-                          ).length
-                        }
-                      </span>
-                    </h2>
-                    <button
-                      className="text-button"
-                      onClick={() => setTab("orders")}
-                    >
-                      {t("Все доставки")} ↗
-                    </button>
-                  </div>
-                  <div className="order-grid">
-                    {orders
-                      .filter(
-                        (o) =>
-                          !["completed", "cancelled", "returned"].includes(
-                            o.status,
-                          ),
-                      )
-                      .slice(0, 4)
-                      .map((o) => (
-                        <OrderCard
-                          key={o.id}
-                          o={o}
-                          t={t}
-                          click={() => open(o.id)}
-                        />
-                      ))}
-                    {orders.length === 0 && (
-                      <Empty
-                        title={t("Пока нет заказов")}
-                        text={
-                          lang === "ru"
-                            ? "Создайте первую посылку или найдите доставку по пути."
-                            : "Birinchi jo‘natmani yarating yoki buyurtma toping."
-                        }
-                      />
-                    )}
-                  </div>
-                  <div className="how">
-                    <span>
-                      <Icon name="shield" />{" "}
-                      {t("Подтвержденные участники")}{" "}
-                    </span>
-                    <span>
-                      <Icon name="check" />{" "}
-                      {t("Передача по одноразовому коду")}{" "}
-                    </span>
-                    <span>
-                      <Icon name="chat" /> {t("Поддержка на каждом этапе")}{" "}
-                    </span>
-                  </div>
-                </>
-              )}
-              {tab === "orders" && (
-                <Orders
-                  orders={orders}
-                  t={t}
-                  open={open}
-                  create={() => setCreating(true)}
+                <ConsumerHome
                   user={user}
+                  name={name}
+                  api={api}
+                  t={t}
+                  pickup={pickup}
+                  setPickup={setPickup}
+                  book={(kind, destination) =>
+                    setBooking({ kind, destination })
+                  }
+                  navigate={(next) => {
+                    if (next === "cargo" || next === "equipment") {
+                      setServiceKind(next);
+                      setServiceRequestId(null);
+                      setTab("services");
+                    } else setTab(next);
+                  }}
+                  openDelivery={open}
+                  openTaxi={(id) => setBooking({ kind: "taxi", id })}
                 />
+              )}
+              {tab === "work" &&
+                (workKind === "delivery" ? (
+                  <Nearby
+                    t={t}
+                    user={user}
+                    run={run}
+                    goProfile={() => setTab("profile")}
+                  />
+                ) : (
+                  <Mobility
+                    key={workKind + ":" + (serviceRequestId ?? "")}
+                    kind={workKind as ServiceKind}
+                    initialId={serviceRequestId}
+                    user={user}
+                    api={api}
+                    t={t}
+                    onBookTaxi={() => setBooking({ kind: "taxi" })}
+                  />
+                ))}
+              {tab === "orders" && (
+                <>
+                  <TripHistory
+                    api={api}
+                    t={t}
+                    open={(s) => {
+                      if (s.customer_id === user.id)
+                        setBooking({ kind: "taxi", id: s.id });
+                      else {
+                        setWorkKind("taxi");
+                        setServiceRequestId(s.id);
+                        setTab("work");
+                      }
+                    }}
+                  />
+                  <Orders
+                    orders={orders}
+                    t={t}
+                    open={open}
+                    create={() => setBooking({ kind: "delivery" })}
+                    advanced={() => setCreating(true)}
+                    user={user}
+                  />
+                </>
               )}
               {tab === "services" && (
                 <>
@@ -682,6 +631,7 @@ export default function App() {
                     user={user}
                     api={api}
                     t={t}
+                    onBookTaxi={() => setBooking({ kind: "taxi" })}
                   />
                 </>
               )}
@@ -694,14 +644,24 @@ export default function App() {
                 />
               )}
               {tab === "profile" && (
-                <Profile
-                  t={t}
-                  user={user}
-                  me={me}
-                  lang={lang}
-                  run={run}
-                  reload={reload}
-                />
+                <>
+                  {user.role !== "user" && (
+                    <button
+                      className="button secondary"
+                      onClick={() => setTab("admin")}
+                    >
+                      {t("Администрирование")}
+                    </button>
+                  )}
+                  <Profile
+                    t={t}
+                    user={user}
+                    me={me}
+                    lang={lang}
+                    run={run}
+                    reload={reload}
+                  />
+                </>
               )}
               {tab === "messages" && (
                 <>
@@ -932,12 +892,14 @@ function Orders({
   t,
   open,
   create,
+  advanced,
   user,
 }: {
   orders: Any[];
   t: (s: string) => string;
   open: (id: string) => void;
   create: () => void;
+  advanced: () => void;
   user: Any;
 }) {
   const [role, setRole] = useState("sender_id");
@@ -954,6 +916,9 @@ function Orders({
           </button>
         }
       />
+      <button className="text-button" onClick={advanced}>
+        {t("Подробное отправление · пункты и постаматы")}
+      </button>
       <div className="segments">
         {[
           ["sender_id", "Отправляю"],

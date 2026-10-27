@@ -8,6 +8,7 @@ import "@fontsource/manrope/700.css";
 import "@fontsource/manrope/800.css";
 import "./globals.css";
 import "leaflet/dist/leaflet.css";
+import "./consumer.css";
 export async function generateMetadata(): Promise<Metadata> {
   return {
     title: await brandName(),
