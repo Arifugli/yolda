@@ -25,6 +25,7 @@ export const serviceStatuses: Record<string, string> = {
   driver_pending: "Ожидаем ответа водителя",
   published: "Поиск исполнителя",
   assigned: "Исполнитель выбран",
+  en_route_to_pickup: "Исполнитель едет к заказчику",
   arrived: "Исполнитель прибыл",
   in_progress: "Выполняется",
   awaiting_confirmation: "Ожидает подтверждения заказчика",

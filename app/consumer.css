@@ -988,3 +988,107 @@
   white-space: normal;
   text-align: center;
 }
+
+/* P0: map-first service home, independently scrollable accessible bottom sheet. */
+.consumer-shell .content {
+  max-width: none;
+  padding: 0;
+}
+.consumer-home {
+  height: 100dvh;
+  position: relative;
+  overflow: hidden;
+  background: #e9eee6;
+}
+.consumer-home > .booking-map-wrap {
+  position: absolute;
+  inset: 0;
+}
+.consumer-home > .consumer-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 410;
+  padding: calc(env(safe-area-inset-top) + 16px) 18px 12px;
+  pointer-events: none;
+}
+.consumer-header > * {
+  pointer-events: auto;
+}
+.consumer-brand {
+  background: #fffffff0;
+  border-radius: 22px;
+  padding: 8px 16px;
+  box-shadow: 0 3px 18px #1c36231a;
+  max-width: 72%;
+}
+.consumer-brand button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  min-height: 44px;
+}
+.home-service-sheet {
+  position: absolute;
+  z-index: 420;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  max-height: 57dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  border-radius: 28px 28px 0 0;
+  padding: 10px 20px 20px;
+  box-shadow: 0 -8px 30px #23362a12;
+}
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  background: #d5dbd5;
+  border-radius: 4px;
+  margin: 0 auto 14px;
+}
+.home-service-sheet h1 {
+  font-size: 22px;
+  line-height: 1.25;
+  margin: 0 0 18px;
+}
+.home-service-sheet .service-art {
+  height: 76px;
+}
+.home-service-sheet .service-tile {
+  min-height: 112px;
+}
+.home-service-sheet button {
+  min-height: 44px;
+}
+.consumer-home .map-connection {
+  top: 125px;
+  bottom: auto;
+  max-width: calc(100% - 36px);
+}
+.consumer-shell .mobile-nav {
+  z-index: 450;
+  min-height: 72px;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@media (min-width: 800px) {
+  .home-service-sheet {
+    left: 20px;
+    right: auto;
+    width: 400px;
+    max-height: calc(100dvh - 230px);
+    border-radius: 28px;
+  }
+  .consumer-home > .consumer-header {
+    max-width: 460px;
+  }
+  .consumer-home .map-connection {
+    left: auto;
+    right: 20px;
+    max-width: 340px;
+  }
+}

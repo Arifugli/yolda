@@ -1,3 +1,6 @@
+import { distanceKm } from "./distance";
+export { distanceKm } from "./distance";
+import { changeOrderState } from "./orders/core";
 import { z } from "zod";
 import type { PoolClient } from "pg";
 import { AppError, verified, type User } from "./auth";
@@ -5,44 +8,6 @@ const coordinate = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
 });
-export function distanceKm(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-) {
-  const r = Math.PI / 180,
-    dlat = (b.lat - a.lat) * r,
-    dlng = (b.lng - a.lng) * r;
-  return (
-    6371 *
-    2 *
-    Math.asin(
-      Math.sqrt(
-        Math.min(
-          1,
-          Math.sin(dlat / 2) ** 2 +
-            Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dlng / 2) ** 2,
-        ),
-      ),
-    )
-  );
-}
-export function taxiQuote(data: unknown) {
-  const b = z
-      .object({ origin: coordinate, destination: coordinate })
-      .parse(data),
-    km = distanceKm(b.origin, b.destination);
-  if (km < 0.05 || km > 150)
-    throw new AppError(
-      400,
-      "Поездка должна быть от 50 метров до 150 км по прямой",
-    );
-  // A transparent fixed demo quote; it does not claim a road distance or routing ETA.
-  return {
-    price: Math.max(10000, Math.ceil((7000 + km * 2500) / 1000) * 1000),
-    distanceKm: Math.round(km * 100) / 100,
-    approximate: true,
-  };
-}
 async function event(
   db: PoolClient,
   u: User,
@@ -50,11 +15,7 @@ async function event(
   status: string,
   detail: string,
 ) {
-  await db.query(
-    "UPDATE service_requests SET status=$2,updated_at=now() WHERE id=$1",
-    [s.id, status],
-  );
-  s.status = status;
+  await changeOrderState(db, u, s, status, detail);
   await db.query(
     "INSERT INTO service_events(request_id,actor_id,status,detail) VALUES($1,$2,$3,$4)",
     [s.id, u.id, status, detail],

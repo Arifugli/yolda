@@ -196,6 +196,7 @@ export default function App() {
     destination?: Place;
   } | null>(null);
   const [workKind, setWorkKind] = useState("delivery");
+  const [authMode, setAuthMode] = useState("demo");
   const t = (s: string) => {
     const label = enumLabels[s] ?? s;
     return lang === "uz"
@@ -208,6 +209,7 @@ export default function App() {
   async function reload() {
     try {
       const configuration = await api("config");
+      setAuthMode(configuration.authMode ?? "demo");
       setMe((prev: Any) => ({ ...prev, settings: configuration.settings }));
       const m = await api("me");
       setUser(m.user);
@@ -249,6 +251,7 @@ export default function App() {
       setNotice(success);
       try {
         const configuration = await api("config");
+        setAuthMode(configuration.authMode ?? "demo");
         setMe((prev: Any) => ({ ...prev, settings: configuration.settings }));
       } catch {}
       return result;
@@ -294,7 +297,14 @@ export default function App() {
     );
   if (!user)
     return (
-      <Login name={name} t={t} lang={lang} setLang={setLang} done={reload} />
+      <Login
+        authMode={authMode}
+        name={name}
+        t={t}
+        lang={lang}
+        setLang={setLang}
+        done={reload}
+      />
     );
   if (booking)
     return (
@@ -949,9 +959,11 @@ function Orders({
     </>
   );
 }
-function Login({ name, t, lang, setLang, done }: Any) {
-  const [phone, setPhone] = useState("+998900000000"),
-    [userName, setName] = useState("Азиза Демо"),
+function Login({ name, t, lang, setLang, done, authMode }: Any) {
+  const [phone, setPhone] = useState(
+      authMode === "demo" ? "+998900000000" : "+998",
+    ),
+    [userName, setName] = useState(authMode === "demo" ? "Азиза Демо" : ""),
     [dob, setDob] = useState("1995-03-15"),
     [code, setCode] = useState(""),
     [demo, setDemo] = useState(""),
@@ -965,8 +977,8 @@ function Login({ name, t, lang, setLang, done }: Any) {
     try {
       if (!sent) {
         const r = await api("auth/otp", { phone, name: userName, dob });
-        setDemo(r.code);
-        setCode(r.code);
+        setDemo(r.code ?? "");
+        setCode(r.code ?? "");
         setSent(true);
       } else {
         await api("auth/login", { phone, code });
@@ -1002,7 +1014,9 @@ function Login({ name, t, lang, setLang, done }: Any) {
           {lang === "ru" ? "O‘zbekcha" : "Русский"}
         </button>
         <div>
-          <span className="eyebrow">{t("Демо-режим")}</span>
+          <span className="eyebrow">
+            {t(authMode === "demo" ? "Демо-режим" : "Вход по телефону")}
+          </span>
           <h2>
             {lang === "ru"
               ? "Добро пожаловать в " + name
@@ -1039,37 +1053,45 @@ function Login({ name, t, lang, setLang, done }: Any) {
                     onChange={(e) => setDob(e.target.value)}
                   />
                 </label>
-                <label>
-                  {t("Демонстрационные аккаунты")}{" "}
-                  <select
-                    value={phone}
-                    onChange={(e) => {
-                      setPhone(e.target.value);
-                      setName("Пользователь Демо");
-                    }}
-                  >
-                    {[
-                      "Азиза · отправитель",
-                      "Бехруз · курьер",
-                      "Дилноза · получатель",
-                      "Сардор · курьер",
-                      "Администратор",
-                      "Оператор точки",
-                      "Непроверенный пользователь",
-                      "Поддержка",
-                      "Финансовый сотрудник",
-                    ].map((n, i) => (
-                      <option key={n} value={"+99890000000" + i}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {authMode === "demo" && (
+                  <label>
+                    {t("Демонстрационные аккаунты")}{" "}
+                    <select
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value);
+                        setName("Пользователь Демо");
+                      }}
+                    >
+                      {[
+                        "Азиза · отправитель",
+                        "Бехруз · курьер",
+                        "Дилноза · получатель",
+                        "Сардор · курьер",
+                        "Администратор",
+                        "Оператор точки",
+                        "Непроверенный пользователь",
+                        "Поддержка",
+                        "Финансовый сотрудник",
+                      ].map((n, i) => (
+                        <option key={n} value={"+99890000000" + i}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </>
             ) : (
               <>
                 <div className="info">
-                  {t("Симуляция SMS. Демо-код:")} <b>{demo}</b>
+                  {demo ? (
+                    <>
+                      {t("Симуляция SMS. Демо-код:")} <b>{demo}</b>
+                    </>
+                  ) : (
+                    t("Введите код из SMS")
+                  )}
                 </div>
                 <label>
                   {t("Код подтверждения")}{" "}

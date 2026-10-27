@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { mapPlace, type Place } from "@/lib/places";
+import dynamic from "next/dynamic";
+const MapCanvas = dynamic(() => import("./map-canvas"), { ssr: false });
+import { mapPlace, cityCenters, type Place } from "@/lib/places";
 import ServiceArt from "./service-art";
 type Row = Record<string, any>;
 export default function ConsumerHome({
@@ -28,6 +30,9 @@ export default function ConsumerHome({
 }) {
   const [recent, setRecent] = useState<Place[]>([]),
     [active, setActive] = useState<Row[]>([]);
+  const [ordersError, setOrdersError] = useState(false),
+    [loading, setLoading] = useState(true),
+    [retry, setRetry] = useState(0);
   useEffect(() => {
     try {
       setRecent(
@@ -65,6 +70,8 @@ export default function ConsumerHome({
   }, [user.id]);
   useEffect(() => {
     let live = true;
+    setLoading(true);
+    setOrdersError(false);
     void Promise.all([api("shipments"), api("mobility?kind=taxi&view=mine")])
       .then(([deliveries, taxis]) => {
         if (live)
@@ -87,13 +94,28 @@ export default function ConsumerHome({
             ].slice(0, 3),
           );
       })
-      .catch(() => {});
+      .catch(() => {
+        if (live) setOrdersError(true);
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
     return () => {
       live = false;
     };
-  }, [user.id]);
+  }, [user.id, retry]);
+  const center = cityCenters[user.profile.city] ?? cityCenters["Фергана"];
   return (
     <section className="consumer-home">
+      <MapCanvas
+        focus={pickup ?? { lat: center[0], lng: center[1] }}
+        origin={pickup}
+        destination={null}
+        selecting={false}
+        bottomInset={0}
+        onMove={() => {}}
+        t={t}
+      />
       <header className="consumer-header">
         <button
           className="round-button"
@@ -121,103 +143,117 @@ export default function ConsumerHome({
           {user.name.slice(0, 1)}
         </button>
       </header>
-      <h1>{t("Куда отправимся сегодня?")}</h1>
-      <div className="consumer-services">
-        <button
-          className="service-tile taxi"
-          aria-label={t("Такси")}
-          onClick={() => book("taxi")}
-        >
-          <ServiceArt kind="taxi" />
-          <span>
-            {t("Такси")} <small>{t("Поездка по городу")}</small>
-          </span>
-        </button>
-        <button
-          className="service-tile delivery"
-          aria-label={t("Доставка")}
-          onClick={() => book("delivery")}
-        >
-          <ServiceArt kind="delivery" />
-          <span>
-            {t("Доставка")} <small>{t("Посылки от двери до двери")}</small>
-          </span>
-        </button>
-        <button
-          className="service-tile compact"
-          aria-label={t("Грузоперевозки")}
-          onClick={() => navigate("cargo")}
-        >
-          <ServiceArt kind="cargo" />
-          <span>{t("Грузоперевозки")}</span>
-        </button>
-        <button
-          className="service-tile compact"
-          aria-label={t("Спецтехника")}
-          onClick={() => navigate("equipment")}
-        >
-          <ServiceArt kind="equipment" />
-          <span>{t("Спецтехника")}</span>
-        </button>
-      </div>
-      <button className="destination-prompt" onClick={() => book("taxi")}>
-        <span className="search-symbol" /> {t("Куда едем?")} <span>›</span>
-      </button>
-      {recent.length > 0 && (
-        <div className="home-addresses">
-          {recent.map((p, i) => (
-            <button key={p.address + i} onClick={() => book("taxi", p)}>
-              <span className="address-round">↗</span>
-              <span>
-                <b>{p.address}</b>
-                <small>{p.city}</small>
-              </span>
-              <span>›</span>
-            </button>
-          ))}
+      <div className="home-service-sheet" aria-label={t("Услуги и заказы")}>
+        <div className="sheet-handle" aria-hidden="true" />
+        <h1>{t("Куда отправимся сегодня?")}</h1>
+        <div className="consumer-services">
+          <button
+            className="service-tile taxi"
+            aria-label={t("Такси")}
+            onClick={() => book("taxi")}
+          >
+            <ServiceArt kind="taxi" />
+            <span>
+              {t("Такси")} <small>{t("Поездка по городу")}</small>
+            </span>
+          </button>
+          <button
+            className="service-tile delivery"
+            aria-label={t("Доставка")}
+            onClick={() => book("delivery")}
+          >
+            <ServiceArt kind="delivery" />
+            <span>
+              {t("Доставка")} <small>{t("Посылки от двери до двери")}</small>
+            </span>
+          </button>
+          <button
+            className="service-tile compact"
+            aria-label={t("Грузоперевозки")}
+            onClick={() => navigate("cargo")}
+          >
+            <ServiceArt kind="cargo" />
+            <span>{t("Грузоперевозки")}</span>
+          </button>
+          <button
+            className="service-tile compact"
+            aria-label={t("Спецтехника")}
+            onClick={() => navigate("equipment")}
+          >
+            <ServiceArt kind="equipment" />
+            <span>{t("Спецтехника")}</span>
+          </button>
         </div>
-      )}
-      {active.length > 0 && (
-        <div className="consumer-active">
-          <div className="section-heading">
-            <h2>{t("Ваши заказы")}</h2>
-            <button onClick={() => navigate("orders")}>{t("Все")} ›</button>
+        <button className="destination-prompt" onClick={() => book("taxi")}>
+          <span className="search-symbol" /> {t("Куда едем?")} <span>›</span>
+        </button>
+        {recent.length > 0 && (
+          <div className="home-addresses">
+            {recent.map((p, i) => (
+              <button key={p.address + i} onClick={() => book("taxi", p)}>
+                <span className="address-round">↗</span>
+                <span>
+                  <b>{p.address}</b>
+                  <small>{p.city}</small>
+                </span>
+                <span>›</span>
+              </button>
+            ))}
           </div>
-          {active.map((s) => (
-            <button
-              className="active-booking"
-              key={s.id}
-              onClick={() =>
-                s.bookingType === "taxi" ? openTaxi(s.id) : openDelivery(s.id)
-              }
-            >
-              <span className="address-round">
-                {s.bookingType === "taxi" ? "↗" : "□"}
-              </span>
-              <span>
-                <b>
-                  {t(
-                    s.bookingType === "taxi" ? "Поездка на такси" : "Доставка",
-                  )}
-                </b>
-                <small>{s.data.destination?.address}</small>
-              </span>
-              <span>›</span>
+        )}
+        {loading && <p role="status">{t("Загружаем заказы…")}</p>}
+        {ordersError && (
+          <div role="alert">
+            {t("Не удалось загрузить заказы")}{" "}
+            <button onClick={() => setRetry((v) => v + 1)}>
+              {t("Повторить")}
             </button>
-          ))}
-        </div>
-      )}
-      <button className="consumer-work" onClick={() => navigate("work")}>
-        <span>↗</span>
-        <div>
-          <b>{t("Зарабатывайте с Yolda")}</b>
-          <p>{t("Принимайте поездки, доставки и заказы на технику")}</p>
-        </div>
-        <span>›</span>
-      </button>
-      <p className="consumer-demo">
-        {t("Демоверсия · оплата и SMS имитируются")}
-      </p>
+          </div>
+        )}
+        {active.length > 0 && (
+          <div className="consumer-active">
+            <div className="section-heading">
+              <h2>{t("Ваши заказы")}</h2>
+              <button onClick={() => navigate("orders")}>{t("Все")} ›</button>
+            </div>
+            {active.map((s) => (
+              <button
+                className="active-booking"
+                key={s.id}
+                onClick={() =>
+                  s.bookingType === "taxi" ? openTaxi(s.id) : openDelivery(s.id)
+                }
+              >
+                <span className="address-round">
+                  {s.bookingType === "taxi" ? "↗" : "□"}
+                </span>
+                <span>
+                  <b>
+                    {t(
+                      s.bookingType === "taxi"
+                        ? "Поездка на такси"
+                        : "Доставка",
+                    )}
+                  </b>
+                  <small>{s.data.destination?.address}</small>
+                </span>
+                <span>›</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <button className="consumer-work" onClick={() => navigate("work")}>
+          <span>↗</span>
+          <div>
+            <b>{t("Зарабатывайте с Yolda")}</b>
+            <p>{t("Принимайте поездки, доставки и заказы на технику")}</p>
+          </div>
+          <span>›</span>
+        </button>
+        <p className="consumer-demo">
+          {t("Демоверсия · оплата и SMS имитируются")}
+        </p>
+      </div>
     </section>
   );
 }

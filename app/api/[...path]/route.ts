@@ -1,3 +1,4 @@
+import { smsMode, sendLoginCode } from "@/lib/sms";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { pool, transaction } from "@/lib/db";
@@ -9,7 +10,7 @@ import {
   type User,
   requireRole,
 } from "@/lib/auth";
-import { assertDemo, otpCode } from "@/lib/providers";
+import { otpCode } from "@/lib/providers";
 import {
   adminAction,
   adminData,
@@ -94,7 +95,7 @@ async function handle(req: NextRequest, ctx: Context) {
       return json({ ok: true });
     }
     if (endpoint === "auth/otp" && post) {
-      assertDemo();
+      const provider = smsMode();
       const b = z
         .object({
           phone: z.string().regex(/^\+998\d{9}$/),
@@ -110,18 +111,34 @@ async function handle(req: NextRequest, ctx: Context) {
       await rate("otp-global", 100, 60);
       await rate("otp:" + b.phone, 3, 600);
       const code = otpCode();
-      await pool.query(
-        "INSERT INTO otp(phone,hash,expires_at,dob,name) VALUES($1,$2,now()+interval '5 minutes',$3,$4) ON CONFLICT(phone) DO UPDATE SET hash=$2,expires_at=now()+interval '5 minutes',attempts=0,dob=$3,name=$4",
-        [b.phone, await codeDigest(code, "otp:" + b.phone), b.dob, b.name],
-      );
-      return json({
-        demo: true,
-        code,
-        message: "Симуляция SMS — код отображается только в демо",
+      await transaction(async (db) => {
+        await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          "otp-send:" + b.phone,
+        ]);
+        await sendLoginCode(b.phone, code);
+        await db.query(
+          "INSERT INTO otp(phone,hash,expires_at,dob,name,provider) VALUES($1,$2,now()+interval '5 minutes',$3,$4,$5) ON CONFLICT(phone) DO UPDATE SET hash=$2,expires_at=now()+interval '5 minutes',attempts=0,dob=$3,name=$4,provider=$5",
+          [
+            b.phone,
+            await codeDigest(code, "otp:" + b.phone),
+            b.dob,
+            b.name,
+            provider,
+          ],
+        );
       });
+      return json(
+        provider === "demo"
+          ? {
+              demo: true,
+              code,
+              message: "Симуляция SMS — код отображается только в демо",
+            }
+          : { demo: false, message: "Код отправлен по SMS" },
+      );
     }
     if (endpoint === "auth/login" && post) {
-      assertDemo();
+      const provider = smsMode();
       const b = z
         .object({
           phone: z.string().regex(/^\+998\d{9}$/),
@@ -135,7 +152,12 @@ async function handle(req: NextRequest, ctx: Context) {
             b.phone,
           ])
         ).rows[0];
-        if (!o || new Date(o.expires_at) < new Date() || o.attempts >= 5)
+        if (
+          !o ||
+          o.provider !== provider ||
+          new Date(o.expires_at) < new Date() ||
+          o.attempts >= 5
+        )
           throw new AppError(401, "Код истек");
         if (o.hash !== (await codeDigest(b.code, "otp:" + b.phone))) {
           await db.query("UPDATE otp SET attempts=attempts+1 WHERE phone=$1", [
@@ -154,6 +176,10 @@ async function handle(req: NextRequest, ctx: Context) {
               [o.name, b.phone, o.dob],
             )
           ).rows[0];
+        await db.query("UPDATE users SET phone_verified=true WHERE id=$1", [
+          user.id,
+        ]);
+        user.phone_verified = true;
         await db.query("DELETE FROM otp WHERE phone=$1", [b.phone]);
         await claimQuickDeliveries(db, user);
         const session = token();
@@ -178,6 +204,7 @@ async function handle(req: NextRequest, ctx: Context) {
     }
     if (endpoint === "config" && !post)
       return json({
+        authMode: process.env.SMS_PROVIDER === "eskiz" ? "sms" : "demo",
         settings: (await pool.query("SELECT data FROM settings WHERE id=1"))
           .rows[0].data,
       });

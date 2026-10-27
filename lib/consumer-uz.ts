@@ -1,4 +1,16 @@
 export const consumerUz: Record<string, string> = {
+  "Вход по телефону": "Telefon orqali kirish",
+  "Введите код из SMS": "SMS kodini kiriting",
+  "Еду к заказчику": "Buyurtmachi tomon yo‘lga chiqdim",
+  "Исполнитель едет к заказчику": "Ijrochi buyurtmachi tomon kelmoqda",
+  "Водитель принял заказ": "Haydovchi buyurtmani qabul qildi",
+  "Услуги и заказы": "Xizmatlar va buyurtmalar",
+  "Загружаем заказы…": "Buyurtmalar yuklanmoqda…",
+  "Не удалось загрузить заказы": "Buyurtmalarni yuklab bo‘lmadi",
+  Повторить: "Qayta urinish",
+  "Карта маршрута": "Yo‘nalish xaritasi",
+  "Карта недоступна. Можно найти адрес или повторить позже.":
+    "Xarita mavjud emas. Manzilni qidiring yoki keyinroq qayta urinib ko‘ring.",
   "Открыть профиль": "Profilni ochish",
   "Укажите ваше местоположение": "Joylashuvingizni belgilang",
   "Поездка по городу": "Shahar bo‘ylab safar",

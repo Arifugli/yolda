@@ -69,8 +69,8 @@ async function post(ctx: BrowserContext, path: string, body: object) {
 }
 test.beforeEach(async () => {
   for (let i = 0; i < 4; i++)
-    await pool.query("DELETE FROM rate_limits WHERE key=$1", [
-      "otp:+99890000000" + i,
+    await pool.query("DELETE FROM rate_limits WHERE key=ANY($1::text[])", [
+      ["otp:+99890000000" + i, "login:+99890000000" + i],
     ]);
 });
 test.afterAll(async () => {

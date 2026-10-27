@@ -5,7 +5,15 @@ import { pool } from "../lib/db";
 import { mutate } from "../lib/service";
 import { mobilityDetail, mobilityList } from "../lib/mobility";
 import type { User } from "../lib/auth";
-import { taxiQuote } from "../lib/taxi";
+import { calculateRide, quoteRide } from "../lib/orders/pricing";
+const taxiQuote = (body: unknown) =>
+  calculateRide(body, {
+    base: 7000,
+    perKm: 2500,
+    minimum: 10000,
+    roundTo: 1000,
+    maxKm: 150,
+  });
 const users: User[] = [],
   requests: string[] = [],
   vehicles: string[] = [];
@@ -163,6 +171,7 @@ test("Такси: автопоиск, подтверждение водител�
     s.body.budget,
   );
   await assert.rejects(call(users[1], "complete", s.id));
+  if (s.body.kind === "taxi") await call(users[1], "depart", s.id);
   await call(users[1], "arrive", s.id);
   const { code } = await call(users[0], "code", s.id);
   await assert.rejects(call(users[0], "code", s.id));
@@ -278,6 +287,7 @@ test("Повтор запроса не создаёт вторую заявку,
 });
 test("Пять неверных кодов сохраняются и блокируют начало, отмена после начала запрещена", async () => {
   const s = await assigned();
+  if (s.body.kind === "taxi") await call(users[1], "depart", s.id);
   await call(users[1], "arrive", s.id);
   const { code } = await call(users[0], "code", s.id);
   const wrong = code === "000000" ? "000001" : "000000";
@@ -336,6 +346,7 @@ test("Конкурентное назначение: один исполните
 });
 test("Спор блокирует завершение, доступ поддержки аудируется, посторонний не может разрешить спор", async () => {
   const s = await assigned();
+  if (s.body.kind === "taxi") await call(users[1], "depart", s.id);
   await call(users[1], "arrive", s.id);
   const { code } = await call(users[0], "code", s.id);
   await call(users[1], "start", s.id, { code });
@@ -363,10 +374,17 @@ test("RLS закрывает таблицы даже при случайном S
     await db.query(`CREATE ROLE ${role}`);
     await db.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
     await db.query(
-      `GRANT SELECT ON users,service_requests,sessions TO ${role}`,
+      `GRANT SELECT ON users,orders,service_requests,order_events,order_tariffs,sessions TO ${role}`,
     );
     await db.query(`SET LOCAL ROLE ${role}`);
-    for (const table of ["users", "service_requests", "sessions"])
+    for (const table of [
+      "users",
+      "orders",
+      "service_requests",
+      "order_events",
+      "order_tariffs",
+      "sessions",
+    ])
       assert.equal((await db.query(`SELECT * FROM ${table}`)).rowCount, 0);
   } finally {
     await db.query("ROLLBACK");
@@ -491,4 +509,82 @@ test("Две одновременные поездки не получают о�
       price: 1000,
     }),
   );
+});
+
+test("Order v1: authoritative row, canonical events, frozen DB tariff, replay and invalid transitions", async () => {
+  const s = await assigned();
+  const row = (await pool.query("SELECT * FROM orders WHERE id=$1", [s.id]))
+    .rows[0];
+  assert.equal(row.engine_version, 1);
+  assert.equal(row.service_type, "ride");
+  assert.equal(row.state, "accepted");
+  assert.equal(row.price_snapshot.price, s.body.budget);
+  assert.equal(row.price_snapshot.tariffVersion, 1);
+  await assert.rejects(call(users[1], "arrive", s.id), /этапе/);
+  await assert.rejects(call(users[2], "depart", s.id), /участник/);
+  const key = randomUUID();
+  await call(users[1], "depart", s.id, {}, key);
+  await call(users[1], "depart", s.id, {}, key);
+  const events = (
+    await pool.query(
+      "SELECT to_state FROM order_events WHERE order_id=$1 ORDER BY id",
+      [s.id],
+    )
+  ).rows.map((r) => r.to_state);
+  assert.deepEqual(events, [
+    "created",
+    "searching",
+    "offered",
+    "accepted",
+    "en_route_to_pickup",
+  ]);
+  assert.equal(
+    (await mobilityDetail(users[0], s.id)).status,
+    "en_route_to_pickup",
+  );
+  await assert.rejects(
+    call(users[0], "create", undefined, {
+      ...input(),
+      quotedTariffVersion: 999,
+    }),
+    /Тариф изменился/,
+  );
+});
+test("Core rollout disabled: old order remains operable with legacy transitions", async () => {
+  const old = process.env.ORDER_CORE_ENABLED;
+  try {
+    process.env.ORDER_CORE_ENABLED = "false";
+    const s = await assigned();
+    assert.equal((await mobilityDetail(users[0], s.id)).engine_version, 0);
+    await call(users[1], "arrive", s.id);
+    assert.equal((await mobilityDetail(users[0], s.id)).status, "arrived");
+    assert.equal(
+      (await pool.query("SELECT 1 FROM order_events WHERE order_id=$1", [s.id]))
+        .rowCount,
+      0,
+    );
+  } finally {
+    if (old === undefined) delete process.env.ORDER_CORE_ENABLED;
+    else process.env.ORDER_CORE_ENABLED = old;
+  }
+});
+
+test("Тариф читается из БД; его изменение не меняет снимок уже созданной поездки", async () => {
+  const s = await request(users[0]);
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    await db.query(
+      "UPDATE order_tariffs SET rules=jsonb_set(rules,'{base}','27000') WHERE service_type='ride' AND active",
+    );
+    const quote = await quoteRide(db, s.body);
+    assert.equal(quote.price, s.body.budget + 20000);
+    const stored = (
+      await db.query("SELECT price_snapshot FROM orders WHERE id=$1", [s.id])
+    ).rows[0];
+    assert.equal(stored.price_snapshot.price, s.body.budget);
+  } finally {
+    await db.query("ROLLBACK");
+    db.release();
+  }
 });

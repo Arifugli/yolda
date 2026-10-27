@@ -43,6 +43,10 @@ async function addVehicle(page: Page, kind: string, name: string) {
   ).toBeVisible();
 }
 async function startAndFinish(customer: Page, driver: Page, taxi: boolean) {
+  if (taxi)
+    await driver
+      .getByRole("button", { name: "Еду к заказчику", exact: true })
+      .click();
   await driver.getByRole("button", { name: "Я прибыл", exact: true }).click();
   await customer
     .getByRole("button", { name: "Получить код начала", exact: true })
@@ -80,8 +84,8 @@ async function startAndFinish(customer: Page, driver: Page, taxi: boolean) {
 }
 test.beforeEach(async () => {
   for (let i = 0; i < 3; i++)
-    await pool.query("DELETE FROM rate_limits WHERE key=$1", [
-      "otp:+99890000000" + i,
+    await pool.query("DELETE FROM rate_limits WHERE key=ANY($1::text[])", [
+      ["otp:+99890000000" + i, "login:+99890000000" + i],
     ]);
 });
 test.afterAll(async () => {

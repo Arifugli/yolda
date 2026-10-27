@@ -67,6 +67,7 @@ export const serviceRequestSchema = z
     reachMeters: z.number().min(0).max(300).default(0),
     durationHours: positive.max(720).default(1),
     budget: z.number().int().min(1000).max(1000000000),
+    quotedTariffVersion: z.number().int().positive().optional(),
     safetyConfirmed: z.literal(true),
   })
   .superRefine((v, ctx) => {

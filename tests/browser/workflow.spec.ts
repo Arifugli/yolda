@@ -34,8 +34,8 @@ test.beforeAll(async ({ request }) => {
     )
     .toBe(200);
   for (let i = 0; i < 7; i++)
-    await pool.query("DELETE FROM rate_limits WHERE key=$1", [
-      "otp:+99890000000" + i,
+    await pool.query("DELETE FROM rate_limits WHERE key=ANY($1::text[])", [
+      ["otp:+99890000000" + i, "login:+99890000000" + i],
     ]);
 });
 test("Полный пользовательский цикл в браузере, чат и отзыв", async ({

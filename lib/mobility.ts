@@ -1,3 +1,6 @@
+import { verticals } from "./orders/verticals";
+import { changeOrderState, initializeOrder } from "./orders/core";
+import { quoteRide } from "./orders/pricing";
 import { z } from "zod";
 import type { PoolClient } from "pg";
 import { pool } from "./db";
@@ -9,7 +12,6 @@ import {
   dispatchTaxi,
   dispatchWaitingTaxis,
   taxiPresence,
-  taxiQuote,
   taxiResponse,
 } from "./taxi";
 
@@ -68,11 +70,7 @@ async function transition(
   status: string,
   detail: string,
 ) {
-  await db.query("UPDATE service_requests SET status=$2 WHERE id=$1", [
-    s.id,
-    status,
-  ]);
-  s.status = status;
+  await changeOrderState(db, u, s, status, detail);
   await record(db, u, s, detail);
   return { id: s.id, status };
 }
@@ -88,7 +86,7 @@ export async function mobilityMutate(
     if (r.online) await dispatchWaitingTaxis(db);
     return r;
   }
-  if (action === "quote") return taxiQuote(body);
+  if (action === "quote") return quoteRide(db, body);
   if (action === "vehicle") {
     await verified(db, u);
     const v = vehicleSchema.parse(body);
@@ -126,10 +124,15 @@ export async function mobilityMutate(
   if (action === "create") {
     allow(u.phone_verified, "Подтвердите телефон");
     const input = serviceRequestSchema.parse(body);
-    if (input.kind === "taxi") {
-      const quote = taxiQuote(input);
+    const useCore =
+      input.kind === "taxi" && process.env.ORDER_CORE_ENABLED !== "false";
+    if (useCore) verticals.ride!.parameters.parse(input);
+    const quote = input.kind === "taxi" ? await quoteRide(db, input) : null;
+    if (quote) {
       allow(
-        input.budget === quote.price,
+        input.budget === quote.price &&
+          (input.quotedTariffVersion === undefined ||
+            input.quotedTariffVersion === quote.tariffVersion),
         "Тариф изменился: пересчитайте стоимость перед заказом",
         409,
       );
@@ -142,10 +145,18 @@ export async function mobilityMutate(
     );
     const s = (
       await db.query(
-        "INSERT INTO service_requests(customer_id,kind,data) VALUES($1,$2,$3) RETURNING *",
-        [u.id, input.kind, JSON.stringify(input)],
+        "INSERT INTO orders(customer_id,kind,data,engine_version,status,price_snapshot) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
+        [
+          u.id,
+          input.kind,
+          JSON.stringify(input),
+          useCore ? 1 : 0,
+          useCore ? "created" : "published",
+          quote ? JSON.stringify(quote) : null,
+        ],
       )
     ).rows[0];
+    if (useCore) await initializeOrder(db, u, s);
     await record(db, u, s, "Заявка опубликована");
     if (s.kind === "taxi") await dispatchTaxi(db, u, s);
     return { id: s.id };
@@ -248,9 +259,26 @@ export async function mobilityMutate(
     member(u, s) || (staff(u) && ["resolve", "message"].includes(action)),
     "Вы не участник заявки",
   );
-  if (action === "arrive") {
+  if (action === "depart") {
     allow(provider);
     stage(s, "assigned");
+    await verified(db, u);
+    return transition(
+      db,
+      u,
+      s,
+      "en_route_to_pickup",
+      "Исполнитель выехал к заказчику",
+    );
+  }
+  if (action === "arrive") {
+    allow(provider);
+    stage(
+      s,
+      ...(s.engine_version === 1
+        ? ["en_route_to_pickup"]
+        : ["assigned", "en_route_to_pickup"]),
+    );
     await verified(db, u);
     return transition(db, u, s, "arrived", "Исполнитель прибыл");
   }
@@ -334,7 +362,14 @@ export async function mobilityMutate(
   }
   if (action === "cancel") {
     allow(customer);
-    stage(s, "published", "driver_pending", "assigned", "arrived");
+    stage(
+      s,
+      "published",
+      "driver_pending",
+      "assigned",
+      "en_route_to_pickup",
+      "arrived",
+    );
     return transition(
       db,
       u,
@@ -345,7 +380,7 @@ export async function mobilityMutate(
   }
   if (action === "decline") {
     allow(provider);
-    stage(s, "assigned", "arrived");
+    stage(s, "assigned", "en_route_to_pickup", "arrived");
     await db.query(
       "UPDATE service_requests SET provider_id=NULL,vehicle_id=NULL,agreed_price=NULL WHERE id=$1",
       [s.id],
@@ -382,6 +417,7 @@ export async function mobilityMutate(
     stage(
       s,
       "assigned",
+      "en_route_to_pickup",
       "arrived",
       "in_progress",
       "awaiting_confirmation",

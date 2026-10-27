@@ -292,15 +292,29 @@ export default function Mobility({
                       </button>
                     </>
                   )}
-                  {performer && detail.status === "assigned" && (
-                    <button
-                      disabled={busy}
-                      className="button"
-                      onClick={() => action("arrive")}
-                    >
-                      {t("Я прибыл")}
-                    </button>
-                  )}
+                  {performer &&
+                    detail.status === "assigned" &&
+                    detail.engine_version === 1 && (
+                      <button
+                        disabled={busy}
+                        className="button"
+                        onClick={() => action("depart")}
+                      >
+                        {t("Еду к заказчику")}
+                      </button>
+                    )}
+                  {performer &&
+                    (detail.status === "en_route_to_pickup" ||
+                      (detail.status === "assigned" &&
+                        detail.engine_version !== 1)) && (
+                      <button
+                        disabled={busy}
+                        className="button"
+                        onClick={() => action("arrive")}
+                      >
+                        {t("Я прибыл")}
+                      </button>
+                    )}
                   {owner && detail.status === "arrived" && (
                     <button
                       disabled={busy}
@@ -369,6 +383,7 @@ export default function Mobility({
                       "published",
                       "driver_pending",
                       "assigned",
+                      "en_route_to_pickup",
                       "arrived",
                     ].includes(detail.status) && (
                       <button
@@ -380,7 +395,9 @@ export default function Mobility({
                       </button>
                     )}
                   {performer &&
-                    ["assigned", "arrived"].includes(detail.status) && (
+                    ["assigned", "en_route_to_pickup", "arrived"].includes(
+                      detail.status,
+                    ) && (
                       <button
                         disabled={busy}
                         className="button secondary"

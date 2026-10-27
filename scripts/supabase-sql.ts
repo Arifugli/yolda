@@ -11,9 +11,11 @@ const migrations = await Promise.all(
 const tables = [
   ...new Set(
     migrations.flatMap((m) =>
-      [...m.sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z_]+)/g)].map(
-        (match) => match[1],
-      ),
+      [
+        ...m.sql.matchAll(
+          /(?:CREATE TABLE(?: IF NOT EXISTS)?\s+|ALTER TABLE [a-z_]+ RENAME TO\s+)([a-z_]+)/g,
+        ),
+      ].map((match) => match[1]),
     ),
   ),
 ];

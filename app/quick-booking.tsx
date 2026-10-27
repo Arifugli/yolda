@@ -253,6 +253,7 @@ export default function QuickBooking({
         passengers,
         consent,
         price: quote.price,
+        tariffVersion: quote.tariffVersion,
       });
       if (pendingBooking.current?.signature !== signature)
         pendingBooking.current = {
@@ -269,6 +270,7 @@ export default function QuickBooking({
                   scheduledAt: new Date().toISOString(),
                   passengers,
                   budget: quote.price,
+                  quotedTariffVersion: quote.tariffVersion,
                   safetyConfirmed: true,
                 }
               : {
@@ -321,7 +323,8 @@ export default function QuickBooking({
     published: kind === "taxi" ? "Ищем водителя" : "Ищем курьера",
     driver_pending: "Водитель подтверждает поездку",
     assigned:
-      kind === "taxi" ? "Водитель едет к вам" : "Курьер едет за посылкой",
+      kind === "taxi" ? "Водитель принял заказ" : "Курьер едет за посылкой",
+    en_route_to_pickup: "Водитель едет к вам",
     arrived: "Водитель на месте",
     pickup_arrived: "Курьер на месте",
     in_progress: "Хорошей поездки!",
@@ -343,6 +346,7 @@ export default function QuickBooking({
   return (
     <div className="quick-booking" data-kind={kind}>
       <MapCanvas
+        t={t}
         focus={focus}
         origin={origin}
         destination={destination}
@@ -505,6 +509,7 @@ export default function QuickBooking({
                       "published",
                       "driver_pending",
                       "assigned",
+                      "en_route_to_pickup",
                       "arrived",
                       "pickup_arrived",
                     ].includes(state) && (

@@ -8,6 +8,7 @@ export default function MapCanvas({
   selecting,
   bottomInset,
   onMove,
+  t = (text: string) => text,
 }: {
   focus: { lat: number; lng: number };
   origin: Place | null;
@@ -15,6 +16,7 @@ export default function MapCanvas({
   selecting: boolean;
   bottomInset: number;
   onMove: (lat: number, lng: number) => void;
+  t?: (text: string) => string;
 }) {
   const node = useRef<HTMLDivElement>(null),
     map = useRef<import("leaflet").Map | null>(null),
@@ -134,7 +136,11 @@ export default function MapCanvas({
   ]);
   return (
     <div className="booking-map-wrap">
-      <div ref={node} className="booking-map" aria-label="Карта маршрута" />
+      <div
+        ref={node}
+        className="booking-map"
+        aria-label={t("Карта маршрута")}
+      />
       {selecting && (
         <div className="center-pin" aria-hidden="true">
           <span />
@@ -143,7 +149,7 @@ export default function MapCanvas({
       )}
       {unavailable && (
         <div className="map-connection">
-          Карта недоступна. Можно найти адрес или повторить позже.
+          {t("Карта недоступна. Можно найти адрес или повторить позже.")}
         </div>
       )}
     </div>

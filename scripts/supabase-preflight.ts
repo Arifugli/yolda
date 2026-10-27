@@ -22,7 +22,7 @@ try {
   )) {
     const sql = await readFile("migrations/" + f, "utf8");
     for (const m of sql.matchAll(
-      /CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z_]+)/g,
+      /(?:CREATE TABLE(?: IF NOT EXISTS)?\s+|ALTER TABLE [a-z_]+ RENAME TO\s+)([a-z_]+)/g,
     ))
       names.add(m[1]);
   }
