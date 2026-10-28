@@ -267,7 +267,12 @@ async function handle(req: NextRequest, ctx: Context) {
         if (path.length === 2 && path[1] === "vehicles")
           return json(await mobilityVehicles(u));
         if (path.length === 2 && path[1] === "presence")
-          return json(await mobilityPresence(u));
+          return json(
+            await mobilityPresence(
+              u,
+              req.nextUrl.searchParams.get("kind") ?? "taxi",
+            ),
+          );
         if (path.length === 2) return json(await mobilityDetail(u, path[1]));
         throw new AppError(404, "Не найдено");
       }

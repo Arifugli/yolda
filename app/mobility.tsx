@@ -8,6 +8,8 @@ import {
   type ServiceKind,
   type VehicleKind,
 } from "@/lib/mobility-catalog";
+import dynamic from "next/dynamic";
+const OrderMap = dynamic(() => import("./map-canvas"), { ssr: false });
 import TaxiMap, { type TaxiPoints } from "./taxi-map";
 type Row = Record<string, any>;
 type Props = {
@@ -50,8 +52,11 @@ export default function Mobility({
   const [error, setError] = useState(""),
     [code, setCode] = useState("");
   useEffect(() => {
-    let active = true;
+    let active = true,
+      loading = false;
     const load = async () => {
+      if (loading) return;
+      loading = true;
       try {
         const [r, v, d] = await Promise.all([
           api(
@@ -76,13 +81,26 @@ export default function Mobility({
         }
       } catch (e) {
         if (active) setError((e as Error).message);
+      } finally {
+        loading = false;
       }
     };
     void load();
-    const timer = setInterval(load, 7000);
+    const stream = selected
+      ? new EventSource(`/api/orders/${selected}/events`)
+      : null;
+    if (stream) {
+      stream.onmessage = () => {
+        void load();
+      };
+    }
+    const timer = setInterval(() => {
+      void load();
+    }, 7000);
     return () => {
       active = false;
       clearInterval(timer);
+      stream?.close();
     };
   }, [kind, view, selected, revision, api]);
   async function submit(path: string, body: object) {
@@ -137,7 +155,7 @@ export default function Mobility({
         {t(
           kind === "taxi"
             ? "Автопоиск: ближайшая доступная машина в радиусе 8 км по прямой. Водитель должен подтвердить поездку за 45 секунд. Геопозиция должна быть свежее двух минут."
-            : "Выберите исполнителя и цену из предложений. Реальные платежи и проверка разрешений пока не подключены.",
+            : "Закажите машину по рассчитанной цене или получите предложения для сложной работы.",
         )}
       </p>
       {error && (
@@ -257,9 +275,24 @@ export default function Mobility({
                       .join(" · ")}
                   </p>
                 )}
+                {Number.isFinite(detail.data.origin.lat) &&
+                  Number.isFinite(detail.data.origin.lng) && (
+                    <div className="heavy-order-map">
+                      <OrderMap
+                        focus={detail.data.origin}
+                        origin={detail.data.origin}
+                        destination={detail.data.destination ?? null}
+                        executor={detail.executorPosition}
+                        selecting={false}
+                        bottomInset={0}
+                        onMove={() => {}}
+                        t={t}
+                      />
+                    </div>
+                  )}
                 <div className="service-actions">
                   {owner &&
-                    kind === "taxi" &&
+                    (kind === "taxi" || detail.data.matchingMode === "auto") &&
                     ["published", "driver_pending"].includes(detail.status) && (
                       <p role="status">
                         {t(
@@ -276,7 +309,9 @@ export default function Mobility({
                         className="button"
                         onClick={() => action("accept")}
                       >
-                        {t("Принять поездку")}
+                        {t(
+                          kind === "taxi" ? "Принять поездку" : "Принять заказ",
+                        )}
                       </button>
                       <button
                         disabled={busy}
@@ -288,7 +323,11 @@ export default function Mobility({
                           }
                         }}
                       >
-                        {t("Отклонить поездку")}
+                        {t(
+                          kind === "taxi"
+                            ? "Отклонить поездку"
+                            : "Отклонить заказ",
+                        )}
                       </button>
                     </>
                   )}
@@ -409,6 +448,7 @@ export default function Mobility({
                 </div>
               </article>
               {kind !== "taxi" &&
+                detail.data.matchingMode !== "auto" &&
                 !member &&
                 !support &&
                 detail.status === "published" && (
@@ -819,6 +859,9 @@ function ServiceForm({
   done: (b: Row) => Promise<void>;
 }) {
   const [vehicle, setVehicle] = useState<VehicleKind>(serviceVehicles[kind][0]);
+  const [mode, setMode] = useState("auto"),
+    [duration, setDuration] = useState(1);
+  const automatic = kind === "taxi" || mode === "auto";
   const [points, setPoints] = useState<TaxiPoints>({
       origin: { lat: "", lng: "" },
       destination: { lat: "", lng: "" },
@@ -840,24 +883,26 @@ function ServiceForm({
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const number = (n: string, fallback = 0) => Number(f.get(n) ?? fallback);
-    if (kind === "taxi" && !quote) {
+    if (automatic && !quote) {
       setError(t("Сначала рассчитайте стоимость поездки"));
       return;
     }
     void done({
       kind,
       vehicleKind: vehicle,
+      matchingMode: mode,
+      quotedTariffVersion: automatic ? quote!.tariffVersion : undefined,
       origin: {
         city: f.get("originCity"),
         address: f.get("originAddress"),
-        ...(kind === "taxi" ? coords().origin : {}),
+        ...(automatic ? coords().origin : {}),
       },
       ...(kind !== "equipment"
         ? {
             destination: {
               city: f.get("destinationCity"),
               address: f.get("destinationAddress"),
-              ...(kind === "taxi" ? coords().destination : {}),
+              ...(automatic ? coords().destination : {}),
             },
           }
         : {}),
@@ -865,7 +910,7 @@ function ServiceForm({
       publicSummary:
         kind === "taxi" ? "Поездка на такси" : f.get("publicSummary"),
       scheduledAt: new Date(String(f.get("scheduledAt"))).toISOString(),
-      budget: kind === "taxi" ? quote!.price : number("budget"),
+      budget: automatic ? quote!.price : number("budget"),
       passengers: number("passengers", 1),
       weightTonnes: number("weightTonnes"),
       liftTonnes: number("liftTonnes"),
@@ -880,13 +925,34 @@ function ServiceForm({
         {t("Назад")}
       </button>
       <h2>{t(kind === "taxi" ? "Новая поездка" : "Новая заявка")}</h2>
+      {kind !== "taxi" && (
+        <label>
+          {t("Способ поиска")}
+          <select
+            aria-label={t("Способ поиска")}
+            value={mode}
+            onChange={(e) => {
+              setMode(e.target.value);
+              setQuote(null);
+            }}
+          >
+            <option value="auto">{t("Автопоиск по фиксированной цене")}</option>
+            <option value="offers">
+              {t("Предложения цены для сложного заказа")}
+            </option>
+          </select>
+        </label>
+      )}
       <div className="form-grid">
         <label>
           {t("Тип машины")}
           <select
             aria-label={t("Тип машины")}
             value={vehicle}
-            onChange={(e) => setVehicle(e.target.value as VehicleKind)}
+            onChange={(e) => {
+              setVehicle(e.target.value as VehicleKind);
+              setQuote(null);
+            }}
           >
             {serviceVehicles[kind].map((v) => (
               <option key={v} value={v}>
@@ -971,11 +1037,15 @@ function ServiceForm({
             {t("Длительность работ, часов")}
             <input
               name="durationHours"
+              value={duration}
+              onChange={(e) => {
+                setDuration(Number(e.target.value));
+                setQuote(null);
+              }}
               type="number"
               min="0.5"
               max="720"
               step="0.5"
-              defaultValue="1"
               required
             />
           </label>
@@ -1006,7 +1076,7 @@ function ServiceForm({
             </label>
           </>
         )}
-        {kind !== "taxi" && (
+        {!automatic && (
           <label>
             {t("Бюджет за весь заказ, сум")}
             <input
@@ -1053,17 +1123,32 @@ function ServiceForm({
           />
         </label>
       </div>
-      {kind === "taxi" && (
+      {automatic && (
         <>
-          <TaxiMap points={points} setPoints={changePoints} t={t} />
+          <TaxiMap
+            single={kind === "equipment"}
+            points={points}
+            setPoints={changePoints}
+            t={t}
+          />
           <button
             type="button"
             className="button secondary"
-            disabled={Object.values(points).some((p) => !p.lat || !p.lng)}
+            disabled={(kind === "equipment"
+              ? [points.origin]
+              : Object.values(points)
+            ).some((p) => !p.lat || !p.lng)}
             onClick={async () => {
               try {
                 setError("");
-                setQuote(await api("mobility/quote", coords()));
+                setQuote(
+                  await api("mobility/quote", {
+                    ...coords(),
+                    kind,
+                    vehicleKind: vehicle,
+                    durationHours: duration,
+                  }),
+                );
               } catch (e) {
                 setError((e as Error).message);
               }
@@ -1073,8 +1158,10 @@ function ServiceForm({
           </button>
           {quote && (
             <p role="status">
-              {t("Стоимость поездки")}: <b>{money(quote.price)}</b> ·{" "}
-              {quote.distanceKm} {t("км по прямой")}
+              {t("Цена за весь заказ")}: <b>{money(quote.price)}</b> ·{" "}
+              {kind === "equipment"
+                ? `${quote.durationHours} ${t("часов работы")}`
+                : `${quote.distanceKm} ${t("км по прямой")}`}
             </p>
           )}
         </>
@@ -1090,11 +1177,13 @@ function ServiceForm({
         {t(
           kind === "taxi"
             ? "Подтверждая заказ, вы соглашаетесь с рассчитанной ценой. Онлайн-оплата пока не подключена."
-            : "Цена за весь заказ согласуется при выборе предложения. Приём и выплата денег в этом разделе пока не подключены.",
+            : automatic
+              ? "Цена фиксируется за выбранный маршрут или длительность работ. Дополнительные часы не списываются автоматически."
+              : "Цена за весь заказ согласуется при выборе предложения. Приём и выплата денег в этом разделе пока не подключены.",
         )}
       </p>
-      <button disabled={busy || (kind === "taxi" && !quote)} className="button">
-        {t("Опубликовать заявку")}
+      <button disabled={busy || (automatic && !quote)} className="button">
+        {t(automatic ? "Заказать" : "Получить предложения")}
       </button>
     </form>
   );

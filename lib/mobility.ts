@@ -2,7 +2,7 @@ import { executorBusy } from "./orders/matching";
 import { executorPosition } from "./orders/delivery";
 import { verticals } from "./orders/verticals";
 import { changeOrderState, initializeOrder } from "./orders/core";
-import { quoteRide } from "./orders/pricing";
+import { quoteRide, quoteHeavy } from "./orders/pricing";
 import { z } from "zod";
 import type { PoolClient } from "pg";
 import { pool } from "./db";
@@ -88,7 +88,10 @@ export async function mobilityMutate(
     if (r.online) await dispatchWaitingTaxis(db);
     return r;
   }
-  if (action === "quote") return quoteRide(db, body);
+  if (action === "quote")
+    return (body as any)?.kind && (body as any).kind !== "taxi"
+      ? quoteHeavy(db, body)
+      : quoteRide(db, body);
   if (action === "vehicle") {
     await verified(db, u);
     const v = vehicleSchema.parse(body);
@@ -127,9 +130,28 @@ export async function mobilityMutate(
     allow(u.phone_verified, "Подтвердите телефон");
     const input = serviceRequestSchema.parse(body);
     const useCore =
-      input.kind === "taxi" && process.env.ORDER_CORE_ENABLED !== "false";
-    if (useCore) verticals.ride!.parameters.parse(input);
-    const quote = input.kind === "taxi" ? await quoteRide(db, input) : null;
+      input.kind === "taxi"
+        ? process.env.ORDER_CORE_ENABLED !== "false"
+        : process.env.HEAVY_CORE_ENABLED !== "false";
+    if (useCore)
+      verticals[
+        input.kind === "taxi"
+          ? "ride"
+          : input.kind === "cargo"
+            ? "freight"
+            : "equipment"
+      ]!.parameters.parse(input);
+    allow(
+      input.kind === "taxi" || input.matchingMode !== "auto" || useCore,
+      "Автопоиск временно недоступен",
+      409,
+    );
+    const quote =
+      input.kind === "taxi"
+        ? await quoteRide(db, input)
+        : input.matchingMode === "auto"
+          ? await quoteHeavy(db, input)
+          : null;
     if (quote) {
       allow(
         input.budget === quote.price &&
@@ -160,7 +182,8 @@ export async function mobilityMutate(
     ).rows[0];
     if (useCore) await initializeOrder(db, u, s);
     await record(db, u, s, "Заявка опубликована");
-    if (s.kind === "taxi") await dispatchTaxi(db, u, s);
+    if (s.kind === "taxi" || (useCore && input.matchingMode === "auto"))
+      await dispatchTaxi(db, u, s);
     return { id: s.id };
   }
   const s = (
@@ -181,7 +204,11 @@ export async function mobilityMutate(
   if (action === "decline" && s.status === "driver_pending")
     return taxiResponse(db, u, s, false);
   if (action === "offer") {
-    allow(s.kind !== "taxi", "Такси назначается автоматически", 409);
+    allow(
+      s.kind !== "taxi" && s.data.matchingMode !== "auto",
+      "Заказ назначается автоматически",
+      409,
+    );
     stage(s, "published");
     allow(!customer, "Нельзя выполнять собственную заявку");
     await verified(db, u);
@@ -220,7 +247,11 @@ export async function mobilityMutate(
     return { ok: true };
   }
   if (action === "assign") {
-    allow(s.kind !== "taxi", "Такси назначается автоматически", 409);
+    allow(
+      s.kind !== "taxi" && s.data.matchingMode !== "auto",
+      "Заказ назначается автоматически",
+      409,
+    );
     allow(customer, "Только заказчик выбирает исполнителя");
     stage(s, "published");
     const b = z.object({ providerId: z.uuid() }).parse(body);
@@ -249,6 +280,26 @@ export async function mobilityMutate(
       "UPDATE service_requests SET provider_id=$2,vehicle_id=$3,agreed_price=$4 WHERE id=$1",
       [s.id, b.providerId, o.vehicle_id, o.price],
     );
+    if (s.engine_version === 1) {
+      await changeOrderState(
+        db,
+        u,
+        s,
+        "driver_pending",
+        "Заказчик выбрал предложение исполнителя",
+      );
+      await db.query("UPDATE orders SET price_snapshot=$2 WHERE id=$1", [
+        s.id,
+        JSON.stringify({
+          mode: "negotiated",
+          price: o.price,
+          currency: "UZS",
+          durationHours: s.data.durationHours,
+          vehicleKind: s.data.vehicleKind,
+          comment: o.comment,
+        }),
+      ]);
+    }
     return transition(
       db,
       u,
@@ -492,6 +543,7 @@ function publicRequest(s: any) {
     status: s.status,
     created_at: s.created_at,
     data: {
+      matchingMode: s.data.matchingMode,
       vehicleKind: s.data.vehicleKind,
       publicSummary: s.data.publicSummary,
       origin: { city: s.data.origin.city },
@@ -518,7 +570,7 @@ export async function mobilityList(u: User, params: URLSearchParams) {
   if (view === "support") allow(staff(u));
   const rows = (
     await pool.query(
-      `SELECT s.*, (SELECT count(*)::int FROM service_offers o WHERE o.request_id=s.id) offer_count FROM service_requests s WHERE kind=$1 AND ${view === "market" ? "status='published' AND customer_id<>$2 AND (data->>'scheduledAt')::timestamptz>now()-interval '1 hour'" : view === "support" ? "dispute_status='open' AND $2::uuid IS NOT NULL" : "(customer_id=$2 OR provider_id=$2 OR EXISTS(SELECT 1 FROM service_offers o WHERE o.request_id=s.id AND o.provider_id=$2))"} ORDER BY created_at DESC LIMIT 100`,
+      `SELECT s.*, (SELECT count(*)::int FROM service_offers o WHERE o.request_id=s.id) offer_count FROM service_requests s WHERE kind=$1 AND ${view === "market" ? "status='published' AND coalesce(data->>'matchingMode','offers')<>'auto' AND customer_id<>$2 AND (data->>'scheduledAt')::timestamptz>now()-interval '1 hour'" : view === "support" ? "dispute_status='open' AND $2::uuid IS NOT NULL" : "(customer_id=$2 OR provider_id=$2 OR EXISTS(SELECT 1 FROM service_offers o WHERE o.request_id=s.id AND o.provider_id=$2))"} ORDER BY created_at DESC LIMIT 100`,
       [kind, u.id],
     )
   ).rows;
@@ -534,17 +586,19 @@ export async function mobilityVehicles(u: User) {
     )
   ).rows;
 }
-export async function mobilityPresence(u: User) {
+export async function mobilityPresence(u: User, rawKind: unknown = "taxi") {
+  const kind = z.enum(["taxi", "cargo", "equipment"]).parse(rawKind);
+  const type = kind === "taxi" ? "ride" : kind === "cargo" ? "freight" : kind;
   const p = (
     await pool.query(
-      "SELECT * FROM taxi_presence WHERE user_id=$1 AND updated_at>now()-interval '120 seconds'",
-      [u.id],
+      "SELECT * FROM executor_presence WHERE user_id=$1 AND service_type=$2 AND updated_at>now()-interval '120 seconds'",
+      [u.id, type],
     )
   ).rows[0];
   const incoming = (
     await pool.query(
-      "SELECT r.*,d.expires_at FROM service_requests r JOIN taxi_dispatches d ON d.request_id=r.id AND d.provider_id=$1 AND d.status='pending' AND d.expires_at>now() WHERE r.kind='taxi' AND r.provider_id=$1 AND r.status='driver_pending'",
-      [u.id],
+      "SELECT r.*,d.expires_at FROM service_requests r JOIN taxi_dispatches d ON d.request_id=r.id AND d.provider_id=$1 AND d.status='pending' AND d.expires_at>now() WHERE r.kind=$2 AND r.provider_id=$1 AND r.status='driver_pending'",
+      [u.id, kind],
     )
   ).rows;
   return { online: !!p, vehicleId: p?.vehicle_id ?? null, incoming };
@@ -620,7 +674,7 @@ export async function mobilityDetail(u: User, id: string) {
       ? await executorPosition(
           pool,
           s.provider_id,
-          "ride",
+          s.kind === "taxi" ? "ride" : s.kind === "cargo" ? "freight" : s.kind,
           !["published", "driver_pending", "completed", "cancelled"].includes(
             s.status,
           ),

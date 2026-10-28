@@ -5,7 +5,7 @@ import { dispatchOrder } from "./matching";
 // shipment before order, matching the HTTP command lock order. SKIP LOCKED permits replicas.
 export async function dispatchTick() {
   const rows = (
-    await pool.query(`SELECT id,kind FROM orders WHERE kind IN ('taxi','delivery') AND status IN ('published','driver_pending')
+    await pool.query(`SELECT id,kind FROM orders WHERE (kind IN ('taxi','delivery') OR (kind IN ('cargo','equipment') AND engine_version=1 AND data->>'matchingMode'='auto')) AND status IN ('published','driver_pending')
  AND (kind='delivery' OR (data->>'scheduledAt')::timestamptz<=now()+interval '20 minutes') ORDER BY updated_at LIMIT 50`)
   ).rows;
   let failures = 0;
@@ -35,7 +35,7 @@ export async function dispatchTick() {
           await db.query("SELECT * FROM users WHERE id=$1", [s.customer_id])
         ).rows[0];
         if (!u || u.restricted) return;
-        if (s.kind === "taxi") await dispatchTaxi(db, u, s);
+        if (s.kind !== "delivery") await dispatchTaxi(db, u, s);
         else await dispatchOrder(db, u, s);
         // Round-robin across waiting orders, including no-match results.
         await db.query("UPDATE orders SET updated_at=now() WHERE id=$1", [

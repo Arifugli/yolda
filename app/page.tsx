@@ -511,18 +511,24 @@ export default function App() {
               >
                 <CourierAvailability user={user} api={api} t={t} open={open} />
               </div>
-              <div className={workKind === "taxi" ? "" : "driver-panel-hidden"}>
-                <TaxiAvailability
-                  api={api}
-                  t={t}
-                  open={(id) => {
-                    setWorkKind("taxi");
-                    setServiceRequestId(id);
-                    setSelected(null);
-                    setCreating(false);
-                  }}
-                />
-              </div>
+              {(["taxi", "cargo", "equipment"] as const).map((service) => (
+                <div
+                  key={service}
+                  className={workKind === service ? "" : "driver-panel-hidden"}
+                >
+                  <TaxiAvailability
+                    kind={service}
+                    api={api}
+                    t={t}
+                    open={(id) => {
+                      setWorkKind(service);
+                      setServiceRequestId(id);
+                      setSelected(null);
+                      setCreating(false);
+                    }}
+                  />
+                </div>
+              ))}
             </>
           )}
           {creating ? (

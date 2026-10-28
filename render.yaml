@@ -28,6 +28,8 @@ services:
         value: "true"
       - key: DB_POOL_MAX
         value: "5"
+      - key: HEAVY_CORE_ENABLED
+        value: "true"
       - key: DELIVERY_CORE_ENABLED
         value: "true"
       - key: DISPATCH_WORKER_ENABLED

@@ -1,11 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { serviceVehicles, type ServiceKind } from "@/lib/mobility-catalog";
 type Row = Record<string, any>;
 export default function TaxiAvailability({
   api,
   t,
   open,
+  kind = "taxi",
 }: {
+  kind?: ServiceKind;
   api: (path: string, body?: any) => Promise<any>;
   t: (s: string) => string;
   open: (id: string) => void;
@@ -17,6 +20,11 @@ export default function TaxiAvailability({
     [error, setError] = useState(""),
     [fresh, setFresh] = useState(false),
     [consent, setConsent] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const fix = useRef<GeolocationPosition | null>(null);
   useEffect(() => {
     let active = true;
@@ -26,7 +34,7 @@ export default function TaxiAvailability({
           if (active)
             setVehicles(
               v.filter(
-                (r: Row) => r.active && ["sedan", "minivan"].includes(r.kind),
+                (r: Row) => r.active && serviceVehicles[kind].includes(r.kind),
               ),
             );
         })
@@ -37,11 +45,11 @@ export default function TaxiAvailability({
       active = false;
       clearInterval(timer);
     };
-  }, [api, online]);
+  }, [api, online, kind]);
   useEffect(() => {
     let active = true;
     const load = () =>
-      api("mobility/presence")
+      api("mobility/presence?kind=" + kind)
         .then((p) => {
           if (active) setIncoming(p.incoming);
         })
@@ -52,7 +60,7 @@ export default function TaxiAvailability({
       active = false;
       clearInterval(timer);
     };
-  }, [api]);
+  }, [api, kind]);
   useEffect(() => {
     if (!online) return;
     if (!navigator.geolocation) {
@@ -78,6 +86,7 @@ export default function TaxiAvailability({
       try {
         await api("mobility/presence", {
           online: true,
+          kind,
           vehicleId,
           lat: p.coords.latitude,
           lng: p.coords.longitude,
@@ -117,27 +126,34 @@ export default function TaxiAvailability({
       clearInterval(timer);
       navigator.geolocation.clearWatch(watch);
       setFresh(false);
-      void api("mobility/presence", { online: false }).catch(() => {});
+      void api("mobility/presence", { online: false, kind }).catch(() => {});
     };
-  }, [online, vehicleId, api]);
+  }, [online, vehicleId, api, kind]);
   return (
     <details
-      className="card service-detail taxi-availability"
+      className={
+        "card service-detail " +
+        (kind === "taxi" ? "taxi-availability" : "heavy-availability")
+      }
       open={online || incoming.length > 0 ? true : undefined}
     >
       <summary>
-        {t("Я водитель такси")} ·{" "}
+        {t(kind === "taxi" ? "Я водитель такси" : "Приём заказов на машину")} ·{" "}
         {t(online && fresh ? "На линии" : "Не на линии")}
       </summary>
       <p>
         {t(
-          "Добавьте машину в «Услуги → Такси → Мои машины». Приём работает с разрешённой геопозицией, пока приложение открыто на экране. Без обновления позиции водитель исключается из поиска через две минуты.",
+          kind === "taxi"
+            ? "Добавьте машину в «Услуги → Такси → Мои машины». Приём работает с разрешённой геопозицией, пока приложение открыто на экране. Без обновления позиции водитель исключается из поиска через две минуты."
+            : "Добавьте машину в разделе «Мои машины». Геопозиция обновляется, пока приложение открыто; без обновления исполнитель исключается из поиска через две минуты.",
         )}
       </p>
       <label>
-        {t("Машина для такси")}
+        {t(kind === "taxi" ? "Машина для такси" : "Машина для заказов")}
         <select
-          aria-label={t("Машина для такси")}
+          aria-label={t(
+            kind === "taxi" ? "Машина для такси" : "Машина для заказов",
+          )}
           disabled={online}
           value={vehicleId}
           onChange={(e) => setVehicleId(e.target.value)}
@@ -158,7 +174,7 @@ export default function TaxiAvailability({
           onChange={(e) => setConsent(e.target.checked)}
         />
         {t(
-          "Разрешаю передавать текущую геопозицию для подбора поездок, пока я на линии.",
+          "Разрешаю передавать текущую геопозицию для подбора заказов, пока я на линии.",
         )}
       </label>
       <button
@@ -180,16 +196,20 @@ export default function TaxiAvailability({
         <div className="service-offer" key={s.id}>
           <div>
             <b>
-              {t("Новая поездка")}:{" "}
+              {t(kind === "taxi" ? "Новая поездка" : "Новый заказ")}:{" "}
               {new Intl.NumberFormat("ru-UZ").format(s.agreed_price)} {t("сум")}
             </b>
             <p>
-              {s.data.origin.address} → {s.data.destination.address}
+              {s.data.origin.address} →{" "}
+              {s.data.destination?.address ?? t("Работы на объекте")}
             </p>
-            <p>{t("Ответьте в течение 45 секунд")}</p>
+            <p>
+              {t("Осталось секунд")}:{" "}
+              {Math.max(0, Math.ceil((Date.parse(s.expires_at) - now) / 1000))}
+            </p>
           </div>
           <button type="button" className="button" onClick={() => open(s.id)}>
-            {t("Открыть поездку")}
+            {t(kind === "taxi" ? "Открыть поездку" : "Открыть заказ")}
           </button>
         </div>
       ))}

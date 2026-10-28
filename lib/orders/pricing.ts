@@ -46,3 +46,56 @@ export async function quoteRide(db: PoolClient, body: unknown) {
     currency: "UZS",
   };
 }
+
+const heavyRoute = z.object({
+  kind: z.enum(["cargo", "equipment"]),
+  vehicleKind: z.string(),
+  origin: coordinate,
+  destination: coordinate.optional(),
+  durationHours: z.number().positive().max(720).default(1),
+});
+export function calculateHeavy(body: unknown, rawRules: unknown) {
+  const b = heavyRoute.parse(body);
+  const rules = rulesSchema
+    .extend({ perHour: z.number().nonnegative() })
+    .parse(rawRules);
+  const km =
+    b.kind === "cargo"
+      ? distanceKm(b.origin, coordinate.parse(b.destination))
+      : 0;
+  if (b.kind === "cargo" && (km < 0.05 || km > rules.maxKm))
+    throw new AppError(400, "Расстояние вне диапазона тарифа");
+  const hours = b.kind === "equipment" ? b.durationHours : 0;
+  const price = Math.max(
+    rules.minimum,
+    Math.ceil(
+      (rules.base + km * rules.perKm + hours * rules.perHour) / rules.roundTo,
+    ) * rules.roundTo,
+  );
+  if (!Number.isSafeInteger(price) || price > 1000000000)
+    throw new AppError(503, "Тариф временно недоступен");
+  return {
+    price,
+    distanceKm: Math.round(km * 100) / 100,
+    durationHours: hours,
+    approximate: true,
+  };
+}
+export async function quoteHeavy(db: PoolClient, body: unknown) {
+  const b = heavyRoute.parse(body);
+  const tariff = (
+    await db.query(
+      "SELECT * FROM order_tariffs WHERE service_type=$1 AND code=$2 AND active FOR SHARE",
+      [b.kind === "cargo" ? "freight" : "equipment", b.vehicleKind],
+    )
+  ).rows[0];
+  if (!tariff) throw new AppError(503, "Тариф временно недоступен");
+  return {
+    ...calculateHeavy(b, tariff.rules),
+    tariffCode: tariff.code,
+    tariffVersion: tariff.version,
+    rules: tariff.rules,
+    currency: "UZS",
+    mode: "fixed",
+  };
+}

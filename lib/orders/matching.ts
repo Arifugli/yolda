@@ -77,7 +77,8 @@ export async function matchingEvent(
   );
 }
 export async function eligible(db: PoolClient, s: any, id: string) {
-  const type = s.kind === "taxi" ? "ride" : "delivery";
+  const type =
+    s.kind === "taxi" ? "ride" : s.kind === "cargo" ? "freight" : s.kind;
   const p = (
     await db.query(
       `SELECT p.*,u.phone,u.profile,u.identity,u.restricted FROM executor_presence p JOIN users u ON u.id=p.user_id
@@ -93,14 +94,22 @@ export async function eligible(db: PoolClient, s: any, id: string) {
     if (e instanceof AppError) return null;
     throw e;
   }
-  if (type === "ride") {
+  if (type !== "delivery") {
     const v = (
       await db.query(
         "SELECT * FROM service_vehicles WHERE id=$1 AND owner_id=$2 AND active FOR SHARE",
         [p.vehicle_id, id],
       )
     ).rows[0];
-    if (!v || v.kind !== s.data.vehicleKind || v.data.seats < s.data.passengers)
+    if (
+      !v ||
+      v.kind !== s.data.vehicleKind ||
+      (type === "ride" && v.data.seats < s.data.passengers) ||
+      (type === "freight" && v.data.capacityTonnes < s.data.weightTonnes) ||
+      (v.kind === "crane" &&
+        (v.data.liftTonnes < s.data.liftTonnes ||
+          v.data.reachMeters < s.data.reachMeters))
+    )
       return null;
   } else {
     const shipment = (
@@ -158,7 +167,7 @@ export async function dispatchOrder(db: PoolClient, u: User, s: any) {
     ).rows[0].count,
   );
   const radius = searchRadius(s.created_at, attempts),
-    type = s.kind === "taxi" ? "ride" : "delivery";
+    type = s.kind === "taxi" ? "ride" : s.kind === "cargo" ? "freight" : s.kind;
   const rows = (
     await db.query(
       `SELECT p.* FROM executor_presence p WHERE service_type=$1 AND updated_at>now()-interval '120 seconds'
@@ -206,7 +215,12 @@ export async function respondOrder(
   if (!d || new Date(d.expires_at).getTime() <= Date.now())
     throw new AppError(409, "Время ответа истекло");
   if (accept) {
-    if (!(await lockExecutor(db, u.id, s.id)) || !(await eligible(db, s, u.id)))
+    const candidate = await eligible(db, s, u.id);
+    if (
+      !(await lockExecutor(db, u.id, s.id)) ||
+      !candidate ||
+      candidate.vehicle_id !== s.vehicle_id
+    )
       throw new AppError(409, "Исполнитель недоступен или уже занят");
     await db.query(
       "UPDATE order_dispatches SET status='accepted' WHERE request_id=$1 AND provider_id=$2",

@@ -43,10 +43,9 @@ async function addVehicle(page: Page, kind: string, name: string) {
   ).toBeVisible();
 }
 async function startAndFinish(customer: Page, driver: Page, taxi: boolean) {
-  if (taxi)
-    await driver
-      .getByRole("button", { name: "Еду к заказчику", exact: true })
-      .click();
+  await driver
+    .getByRole("button", { name: "Еду к заказчику", exact: true })
+    .click();
   await driver.getByRole("button", { name: "Я прибыл", exact: true }).click();
   await customer
     .getByRole("button", { name: "Получить код начала", exact: true })
@@ -231,6 +230,9 @@ test("Спецтехника в браузере: кран, предложени
       .getByRole("button", { name: "Создать заявку", exact: true })
       .click();
     await customer
+      .getByLabel("Способ поиска", { exact: true })
+      .selectOption("offers");
+    await customer
       .getByLabel("Адрес работ", { exact: true })
       .fill("Стройплощадка 12");
     await customer
@@ -248,7 +250,7 @@ test("Спецтехника в браузере: кран, предложени
       .getByRole("checkbox", { name: /Согласую безопасную посадку/ })
       .check();
     await customer
-      .getByRole("button", { name: "Опубликовать заявку", exact: true })
+      .getByRole("button", { name: "Получить предложения", exact: true })
       .click();
     await expect(customer.locator(".service-detail .pill")).toHaveText(
       "Поиск исполнителя",
@@ -306,3 +308,95 @@ test("Мобильные услуги не выходят за ширину эк
 function assertNoErrors(errors: string[]) {
   expect(errors).toEqual([]);
 }
+
+test("Спецтехника: мобильный автопоиск крана, почасовая цена и полный цикл", async ({
+  browser,
+}) => {
+  test.setTimeout(120000);
+  const a = await browser.newContext({ viewport: { width: 390, height: 844 } }),
+    b = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      geolocation: { latitude: 40.386, longitude: 71.787, accuracy: 10 },
+      permissions: ["geolocation"],
+    }),
+    customer = await a.newPage(),
+    driver = await b.newPage();
+  try {
+    await login(customer, 0);
+    await login(driver, 1);
+    await services(driver, "Спецтехника");
+    await addVehicle(driver, "crane", prefix + "-automatic-crane");
+    const panel = driver.locator(".heavy-availability:visible");
+    await panel.locator("summary").click();
+    await panel
+      .getByLabel("Машина для заказов", { exact: true })
+      .selectOption({ label: prefix + "-automatic-crane · TEST-000" });
+    await panel.getByRole("checkbox").check();
+    await panel
+      .getByRole("button", { name: "Выйти на линию", exact: true })
+      .click();
+    await expect(panel.locator("summary")).toContainText("На линии");
+    await services(customer, "Спецтехника");
+    await customer
+      .getByRole("button", { name: "Создать заявку", exact: true })
+      .click();
+    await customer
+      .getByLabel("Способ поиска", { exact: true })
+      .selectOption("auto");
+    await customer
+      .getByLabel("Адрес работ", { exact: true })
+      .fill("Стройплощадка 12");
+    await customer
+      .getByLabel("Масса подъёма, тонн", { exact: true })
+      .fill("10");
+    await customer
+      .getByLabel("Вылет стрелы, метров", { exact: true })
+      .fill("20");
+    await customer
+      .getByLabel("Длительность работ, часов", { exact: true })
+      .fill("2");
+    await customer
+      .getByLabel("Описание груза или работ, размеры, условия доступа", {
+        exact: true,
+      })
+      .fill(prefix + "-automatic-job");
+    await customer.getByText("Координаты точек", { exact: true }).click();
+    await customer.getByLabel("origin lat", { exact: true }).fill("40.386");
+    await customer.getByLabel("origin lng", { exact: true }).fill("71.786");
+    await customer
+      .getByRole("button", { name: "Рассчитать стоимость", exact: true })
+      .click();
+    await expect(customer.getByRole("status")).toContainText("500");
+    await customer
+      .getByRole("checkbox", { name: /Согласую безопасную посадку/ })
+      .check();
+    await customer
+      .getByRole("button", { name: "Заказать", exact: true })
+      .click();
+    await panel
+      .getByRole("button", { name: "Открыть заказ", exact: true })
+      .click({ timeout: 20000 });
+    await driver
+      .getByRole("button", { name: "Принять заказ", exact: true })
+      .click();
+    await expect(customer.locator(".service-detail .pill")).toHaveText(
+      "Исполнитель выбран",
+    );
+    await expect(customer.locator(".heavy-order-map")).toBeVisible();
+    const overflow = await customer.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    );
+    expect(overflow).toBe(false);
+    await customer.screenshot({
+      path: "artifacts/heavy-automatic-mobile.png",
+      fullPage: true,
+    });
+    await startAndFinish(customer, driver, false);
+    await panel
+      .getByRole("button", { name: "Уйти с линии", exact: true })
+      .click();
+  } finally {
+    await a.close();
+    await b.close();
+  }
+});

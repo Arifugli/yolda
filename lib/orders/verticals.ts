@@ -13,9 +13,22 @@ export interface Vertical {
   tariff: string;
   vehicleKinds: readonly string[];
 }
-// Freight/equipment stay behind legacy adapters until their migration.
-// Register only implemented verticals; no simulated availability of future services.
+// Verticals share the state machine, with service-specific validated parameters.
 export const verticals: Partial<Record<ServiceType, Vertical>> = {
+  freight: {
+    type: "freight",
+    parameters: serviceRequestSchema.refine((v) => v.kind === "cargo"),
+    route: rideRoute,
+    tariff: "vehicle",
+    vehicleKinds: ["van", "truck", "dump_truck", "semi_trailer"],
+  },
+  equipment: {
+    type: "equipment",
+    parameters: serviceRequestSchema.refine((v) => v.kind === "equipment"),
+    route: rideRoute.pick({ origin: true }),
+    tariff: "hourly",
+    vehicleKinds: ["crane", "excavator", "loader", "dump_truck"],
+  },
   delivery: {
     type: "delivery",
     parameters: deliveryBookingSchema,

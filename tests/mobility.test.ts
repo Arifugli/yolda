@@ -1,11 +1,17 @@
 import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { pool } from "../lib/db";
+import { dispatchTick } from "../lib/orders/worker";
+import { pool, transaction } from "../lib/db";
 import { mutate } from "../lib/service";
 import { mobilityDetail, mobilityList } from "../lib/mobility";
 import type { User } from "../lib/auth";
-import { calculateRide, quoteRide } from "../lib/orders/pricing";
+import {
+  calculateRide,
+  quoteRide,
+  quoteHeavy,
+  calculateHeavy,
+} from "../lib/orders/pricing";
 const taxiQuote = (body: unknown) =>
   calculateRide(body, {
     base: 7000,
@@ -137,9 +143,10 @@ before(async () => {
 });
 after(async () => {
   const ids = users.map((u) => u.id);
-  await pool.query("DELETE FROM taxi_presence WHERE user_id=ANY($1::uuid[])", [
-    ids,
-  ]);
+  await pool.query(
+    "DELETE FROM executor_presence WHERE user_id=ANY($1::uuid[])",
+    [ids],
+  );
   await pool.query("DELETE FROM service_requests WHERE id=ANY($1::uuid[])", [
     requests,
   ]);
@@ -156,9 +163,10 @@ after(async () => {
   await pool.end();
 });
 afterEach(async () => {
-  await pool.query("DELETE FROM taxi_presence WHERE user_id=ANY($1::uuid[])", [
-    users.map((u) => u.id),
-  ]);
+  await pool.query(
+    "DELETE FROM executor_presence WHERE user_id=ANY($1::uuid[])",
+    [users.map((u) => u.id)],
+  );
   await pool.query(
     "UPDATE service_requests SET status='cancelled' WHERE id=ANY($1::uuid[]) AND status NOT IN ('completed','cancelled')",
     [requests],
@@ -171,7 +179,7 @@ test("Такси: автопоиск, подтверждение водител�
     s.body.budget,
   );
   await assert.rejects(call(users[1], "complete", s.id));
-  if (s.body.kind === "taxi") await call(users[1], "depart", s.id);
+  await call(users[1], "depart", s.id);
   await call(users[1], "arrive", s.id);
   const { code } = await call(users[0], "code", s.id);
   await assert.rejects(call(users[0], "code", s.id));
@@ -287,7 +295,7 @@ test("Повтор запроса не создаёт вторую заявку,
 });
 test("Пять неверных кодов сохраняются и блокируют начало, отмена после начала запрещена", async () => {
   const s = await assigned();
-  if (s.body.kind === "taxi") await call(users[1], "depart", s.id);
+  await call(users[1], "depart", s.id);
   await call(users[1], "arrive", s.id);
   const { code } = await call(users[0], "code", s.id);
   const wrong = code === "000000" ? "000001" : "000000";
@@ -346,7 +354,7 @@ test("Конкурентное назначение: один исполните
 });
 test("Спор блокирует завершение, доступ поддержки аудируется, посторонний не может разрешить спор", async () => {
   const s = await assigned();
-  if (s.body.kind === "taxi") await call(users[1], "depart", s.id);
+  await call(users[1], "depart", s.id);
   await call(users[1], "arrive", s.id);
   const { code } = await call(users[0], "code", s.id);
   await call(users[1], "start", s.id, { code });
@@ -591,4 +599,184 @@ test("Тариф читается из БД; его изменение не ме
     await db.query("ROLLBACK");
     db.release();
   }
+});
+
+test("Heavy: full automatic freight and hourly equipment cycles share canonical states", async () => {
+  for (const [kind, vehicleKind] of [
+    ["cargo", "truck"],
+    ["equipment", "crane"],
+  ]) {
+    const b = { ...input(kind, vehicleKind), matchingMode: "auto" };
+    const q = await transaction((db) => quoteHeavy(db, b));
+    b.budget = q.price;
+    const s = await call(users[0], "create", undefined, {
+      ...b,
+      quotedTariffVersion: q.tariffVersion,
+    });
+    requests.push(s.id);
+    assert.equal((await mobilityDetail(users[0], s.id)).engine_version, 1);
+    const v = await vehicle(users[1], vehicleKind);
+    await call(users[1], "presence", undefined, {
+      kind,
+      online: true,
+      vehicleId: v.id,
+      lat: 40.386,
+      lng: 71.787,
+      accuracy: 10,
+      consent: true,
+    });
+    await dispatchTick();
+    const offered = await mobilityDetail(users[0], s.id);
+    assert.equal(offered.status, "driver_pending");
+    assert.equal(offered.price_snapshot.price, q.price);
+    await assert.rejects(call(users[2], "accept", s.id));
+    await assert.rejects(
+      call(users[1], "offer", s.id, { vehicleId: v.id, price: 1000 }),
+    );
+    const replacement = await vehicle(users[1], vehicleKind);
+    await call(users[1], "presence", undefined, {
+      kind,
+      online: true,
+      vehicleId: replacement.id,
+      lat: 40.386,
+      lng: 71.787,
+      accuracy: 10,
+      consent: true,
+    });
+    await assert.rejects(call(users[1], "accept", s.id), /недоступен/);
+    await call(users[1], "presence", undefined, {
+      kind,
+      online: true,
+      vehicleId: v.id,
+      lat: 40.386,
+      lng: 71.787,
+      accuracy: 10,
+      consent: true,
+    });
+    await call(users[1], "accept", s.id);
+    await assert.rejects(call(users[1], "arrive", s.id), /этапе/);
+    await call(users[1], "depart", s.id);
+    await call(users[1], "arrive", s.id);
+    const { code } = await call(users[0], "code", s.id);
+    await call(users[1], "start", s.id, { code });
+    await assert.rejects(call(users[0], "cancel", s.id));
+    await call(users[1], "finish", s.id);
+    await call(users[0], "complete", s.id);
+    await call(users[0], "review", s.id, { stars: 5, comment: "Выполнено" });
+    const states = (
+      await pool.query(
+        "SELECT to_state FROM order_events WHERE order_id=$1 ORDER BY id",
+        [s.id],
+      )
+    ).rows.map((r) => r.to_state);
+    assert.deepEqual(states, [
+      "created",
+      "searching",
+      "offered",
+      "accepted",
+      "en_route_to_pickup",
+      "arrived",
+      "in_progress",
+      "in_progress",
+      "completed",
+    ]);
+  }
+});
+test("Heavy: negotiated price is snapshotted, old orders remain operable", async () => {
+  const s = await assigned("equipment", "crane");
+  let d = await mobilityDetail(users[0], s.id);
+  assert.equal(d.engine_version, 1);
+  assert.equal(d.price_snapshot.mode, "negotiated");
+  assert.equal(d.price_snapshot.price, 180000);
+  await call(users[1], "decline", s.id);
+  d = await mobilityDetail(users[0], s.id);
+  assert.equal(d.status, "published");
+  await close(s.id);
+  const old = process.env.HEAVY_CORE_ENABLED;
+  try {
+    process.env.HEAVY_CORE_ENABLED = "false";
+    const legacy = await assigned("cargo", "truck");
+    assert.equal((await mobilityDetail(users[0], legacy.id)).engine_version, 0);
+    await call(users[1], "arrive", legacy.id);
+  } finally {
+    if (old === undefined) delete process.env.HEAVY_CORE_ENABLED;
+    else process.env.HEAVY_CORE_ENABLED = old;
+  }
+});
+test("Heavy: scheduled search, stale tariff, capability filter and shared busy guard", async () => {
+  const b = {
+    ...input("cargo", "truck"),
+    matchingMode: "auto",
+    scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+  };
+  const q = await transaction((db) => quoteHeavy(db, b));
+  b.budget = q.price;
+  await assert.rejects(
+    call(users[0], "create", undefined, { ...b, quotedTariffVersion: 999 }),
+    /Тариф изменился/,
+  );
+  const s = await call(users[0], "create", undefined, b);
+  requests.push(s.id);
+  const small = await vehicle(users[1], "truck", { capacityTonnes: 1 });
+  await call(users[1], "presence", undefined, {
+    kind: "cargo",
+    online: true,
+    vehicleId: small.id,
+    lat: 40.386,
+    lng: 71.787,
+    accuracy: 10,
+    consent: true,
+  });
+  await dispatchTick();
+  assert.equal((await mobilityDetail(users[0], s.id)).status, "published");
+  await pool.query(
+    "UPDATE orders SET data=jsonb_set(data,'{scheduledAt}',to_jsonb(now()::text)) WHERE id=$1",
+    [s.id],
+  );
+  await dispatchTick();
+  assert.equal((await mobilityDetail(users[0], s.id)).status, "published");
+  const big = await vehicle(users[1], "truck");
+  await call(users[1], "presence", undefined, {
+    kind: "cargo",
+    online: true,
+    vehicleId: big.id,
+    lat: 40.386,
+    lng: 71.787,
+    accuracy: 10,
+    consent: true,
+  });
+  await dispatchTick();
+  assert.equal((await mobilityDetail(users[0], s.id)).status, "driver_pending");
+  const ride = await request(users[2]);
+  const car = await vehicle(users[1]);
+  await call(users[1], "presence", undefined, {
+    online: true,
+    vehicleId: car.id,
+    lat: 40.386,
+    lng: 71.787,
+    accuracy: 10,
+    consent: true,
+  });
+  assert.equal((await mobilityDetail(users[2], ride.id)).status, "published");
+  await call(users[1], "decline", s.id);
+  await dispatchTick();
+  assert.equal(
+    (await mobilityDetail(users[2], ride.id)).status,
+    "driver_pending",
+  );
+});
+test("Heavy pricing: fixed hours, rounding, route and invalid rule validation", () => {
+  const b = { ...input("equipment", "crane"), durationHours: 2.5 };
+  const rules = {
+    base: 100000,
+    perKm: 0,
+    perHour: 200000,
+    minimum: 300000,
+    roundTo: 1000,
+    maxKm: 150,
+  };
+  assert.equal(calculateHeavy(b, rules).price, 600000);
+  assert.throws(() => calculateHeavy({ ...b, durationHours: 0 }, rules));
+  assert.throws(() => calculateHeavy(b, { ...rules, perHour: -1 }));
+  assert.throws(() => calculateHeavy({ ...b, kind: "cargo" }, rules));
 });

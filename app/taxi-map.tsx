@@ -6,7 +6,9 @@ export default function TaxiMap({
   points,
   setPoints,
   t,
+  single = false,
 }: {
+  single?: boolean;
   points: TaxiPoints;
   setPoints: (p: TaxiPoints) => void;
   t: (s: string) => string;
@@ -31,7 +33,7 @@ export default function TaxiMap({
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
           maxZoom: 19,
-            referrerPolicy: "strict-origin-when-cross-origin",
+          referrerPolicy: "strict-origin-when-cross-origin",
         }).addTo(m);
         m.on("click", (e: import("leaflet").LeafletMouseEvent) => {
           const key = currentTarget.current;
@@ -42,7 +44,7 @@ export default function TaxiMap({
               lng: e.latlng.lng.toFixed(6),
             },
           });
-          if (key === "origin") setTarget("destination");
+          if (key === "origin" && !single) setTarget("destination");
         });
         const redraw = () => {
           markers.forEach((marker) => marker.remove());
@@ -92,7 +94,7 @@ export default function TaxiMap({
           },
         });
         map.current?.setView([p.coords.latitude, p.coords.longitude], 15);
-        setTarget("destination");
+        if (!single) setTarget("destination");
         setError("");
       },
       () => setError(t("Разрешите геопозицию или выберите точку на карте.")),
@@ -109,20 +111,24 @@ export default function TaxiMap({
         >
           {t("A · Откуда")}
         </button>
-        <button
-          type="button"
-          className={target === "destination" ? "button" : "button secondary"}
-          onClick={() => setTarget("destination")}
-        >
-          {t("B · Куда")}
-        </button>
+        {!single && (
+          <button
+            type="button"
+            className={target === "destination" ? "button" : "button secondary"}
+            onClick={() => setTarget("destination")}
+          >
+            {t("B · Куда")}
+          </button>
+        )}
         <button type="button" className="text-button" onClick={locate}>
           {t("Моё местоположение")}
         </button>
       </div>
       <p>
         {t(
-          "Выберите две точки на карте. Расстояние и тариф MVP рассчитаны по прямой, дорожный маршрут пока не строится.",
+          single
+            ? "Выберите место работы на карте."
+            : "Выберите две точки на карте. Расстояние и тариф MVP рассчитаны по прямой, дорожный маршрут пока не строится.",
         )}
       </p>
       <div
@@ -133,7 +139,11 @@ export default function TaxiMap({
       <details>
         <summary>{t("Координаты точек")}</summary>
         <div className="form-grid">
-          {(["origin", "destination"] as const).map((key) => (
+          {(
+            (single
+              ? ["origin"]
+              : ["origin", "destination"]) as (keyof TaxiPoints)[]
+          ).map((key) => (
             <fieldset key={key}>
               <legend>{t(key === "origin" ? "Откуда" : "Куда")}</legend>
               {(["lat", "lng"] as const).map((axis) => (

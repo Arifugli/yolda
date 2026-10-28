@@ -1094,3 +1094,6 @@
 }
 .executor-dot {display:grid;place-items:center;border:3px solid white;border-radius:50%;background:#176e58;color:white;box-shadow:0 2px 12px #172c2455;font-size:22px;}
 .courier-availability button {min-height:44px;}
+
+.heavy-order-map { position: relative; height: 260px; border-radius: 20px; overflow: hidden; margin: 16px 0; }
+.heavy-order-map .booking-map-wrap, .heavy-order-map .booking-map { position: absolute; inset: 0; height: 100%; min-height: 0; }

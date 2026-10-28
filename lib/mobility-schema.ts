@@ -67,6 +67,7 @@ export const serviceRequestSchema = z
     reachMeters: z.number().min(0).max(300).default(0),
     durationHours: positive.max(720).default(1),
     budget: z.number().int().min(1000).max(1000000000),
+    matchingMode: z.enum(["auto", "offers"]).default("offers"),
     quotedTariffVersion: z.number().int().positive().optional(),
     safetyConfirmed: z.literal(true),
   })
@@ -84,15 +85,19 @@ export const serviceRequestSchema = z
         message: "Укажите пункт назначения",
       });
     if (
-      v.kind === "taxi" &&
-      [v.origin.lat, v.origin.lng, v.destination?.lat, v.destination?.lng].some(
-        (n) => n === undefined,
-      )
+      (v.kind === "taxi" || v.matchingMode === "auto") &&
+      [
+        v.origin.lat,
+        v.origin.lng,
+        ...(v.kind === "equipment"
+          ? []
+          : [v.destination?.lat, v.destination?.lng]),
+      ].some((n) => n === undefined)
     )
       ctx.addIssue({
         code: "custom",
         path: ["origin"],
-        message: "Для автопоиска такси нужны координаты маршрута",
+        message: "Для автопоиска нужны координаты маршрута или места работы",
       });
     if (v.kind === "cargo" && v.weightTonnes <= 0)
       ctx.addIssue({

@@ -1,9 +1,14 @@
 export { distanceKm } from "./distance";
 import { dispatchOrder, respondOrder, matchingEvent } from "./orders/matching";
+import { serviceVehicles } from "./mobility-catalog";
 import { z } from "zod";
 import type { PoolClient } from "pg";
 import { AppError, verified, type User } from "./auth";
 export async function taxiPresence(db: PoolClient, u: User, body: unknown) {
+  const kind = z
+    .enum(["taxi", "cargo", "equipment"])
+    .parse((body as any)?.kind ?? "taxi");
+  const type = kind === "taxi" ? "ride" : kind === "cargo" ? "freight" : kind;
   const b = z
     .discriminatedUnion("online", [
       z.object({ online: z.literal(false) }),
@@ -19,8 +24,8 @@ export async function taxiPresence(db: PoolClient, u: User, body: unknown) {
     .parse(body);
   if (!b.online) {
     await db.query(
-      "DELETE FROM executor_presence WHERE user_id=$1 AND service_type='ride'",
-      [u.id],
+      "DELETE FROM executor_presence WHERE user_id=$1 AND service_type=$2",
+      [u.id, type],
     );
     return { online: false };
   }
@@ -31,20 +36,27 @@ export async function taxiPresence(db: PoolClient, u: User, body: unknown) {
       [b.vehicleId, u.id],
     )
   ).rows[0];
-  if (!v || !["sedan", "minivan"].includes(v.kind))
+  if (!v || !serviceVehicles[kind].includes(v.kind))
     throw new AppError(
       400,
-      "Для такси нужна собственная активная легковая машина или минивэн",
+      "Выберите собственную активную машину подходящего типа",
     );
   await db.query(
-    "INSERT INTO executor_presence(user_id,vehicle_id,lat,lng,accuracy,updated_at) VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(user_id,service_type) DO UPDATE SET vehicle_id=$2,lat=$3,lng=$4,accuracy=$5,updated_at=now()",
-    [u.id, b.vehicleId, b.lat, b.lng, b.accuracy],
+    "INSERT INTO executor_presence(user_id,vehicle_id,lat,lng,accuracy,updated_at,service_type) VALUES($1,$2,$3,$4,$5,now(),$6) ON CONFLICT(user_id,service_type) DO UPDATE SET vehicle_id=$2,lat=$3,lng=$4,accuracy=$5,updated_at=now()",
+    [u.id, b.vehicleId, b.lat, b.lng, b.accuracy, type],
   );
   return { online: true, expiresIn: 120 };
 }
 export async function dispatchTaxi(db: PoolClient, u: User, s: any) {
-  if (s.kind !== "taxi" || u.id !== s.customer_id)
-    throw new AppError(403, "Автопоиск доступен заказчику такси");
+  if (
+    (s.kind !== "taxi" &&
+      !(s.engine_version === 1 && s.data.matchingMode === "auto")) ||
+    u.id !== s.customer_id
+  )
+    throw new AppError(
+      403,
+      "Автопоиск доступен заказчику автоматического заказа",
+    );
   if (!["published", "driver_pending"].includes(s.status))
     return { id: s.id, status: s.status };
   const at = new Date(s.data.scheduledAt).getTime();
@@ -73,7 +85,11 @@ export async function taxiResponse(
   s: any,
   accept: boolean,
 ) {
-  if (s.kind !== "taxi") throw new AppError(403, "Неверная услуга");
+  if (
+    s.kind !== "taxi" &&
+    !(s.engine_version === 1 && s.data.matchingMode === "auto")
+  )
+    throw new AppError(403, "Неверная услуга");
   return respondOrder(db, u, s, accept);
 }
 export async function dispatchWaitingTaxis(db: PoolClient) {

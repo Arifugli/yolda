@@ -1,4 +1,31 @@
 export const consumerUz: Record<string, string> = {
+  "Закажите машину по рассчитанной цене или получите предложения для сложной работы.":
+    "Hisoblangan narxda mashina buyurtma qiling yoki murakkab ish uchun takliflar oling.",
+  "Выберите собственную активную машину подходящего типа":
+    "O‘zingizga tegishli mos turdagi faol mashinani tanlang",
+  "Для автопоиска нужны координаты маршрута или места работы":
+    "Avtomatik qidiruv uchun yo‘nalish yoki ish joyi koordinatalari kerak",
+  "Автопоиск временно недоступен": "Avtomatik qidiruv vaqtincha mavjud emas",
+  "Заказ назначается автоматически": "Buyurtma avtomatik tayinlanadi",
+  "Принять заказ": "Buyurtmani qabul qilish",
+  "Отклонить заказ": "Buyurtmani rad etish",
+  "Приём заказов на машину": "Mashina uchun buyurtmalarni qabul qilish",
+  "Машина для заказов": "Buyurtmalar uchun mashina",
+  "Новый заказ": "Yangi buyurtma",
+  "Открыть заказ": "Buyurtmani ochish",
+  "Разрешаю передавать текущую геопозицию для подбора заказов, пока я на линии.":
+    "Onlayn paytimda buyurtmalarni tanlash uchun joylashuvimni yuborishga roziman.",
+  "Добавьте машину в разделе «Мои машины». Геопозиция обновляется, пока приложение открыто; без обновления исполнитель исключается из поиска через две минуты.":
+    "«Mening mashinalarim» bo‘limida mashina qo‘shing. Joylashuv ilova ochiq paytda yangilanadi; yangilanmasa ijrochi ikki daqiqadan so‘ng qidiruvdan chiqariladi.",
+  "Способ поиска": "Qidiruv usuli",
+  "Автопоиск по фиксированной цене": "Belgilangan narxda avtomatik qidiruv",
+  "Предложения цены для сложного заказа":
+    "Murakkab buyurtma uchun narx takliflari",
+  "Выберите место работы на карте.": "Xaritada ish joyini tanlang.",
+  "Цена за весь заказ": "Butun buyurtma narxi",
+  "Цена фиксируется за выбранный маршрут или длительность работ. Дополнительные часы не списываются автоматически.":
+    "Narx tanlangan yo‘nalish yoki ish davomiyligi uchun belgilanadi. Qo‘shimcha soatlar uchun pul avtomatik yechilmaydi.",
+  "Получить предложения": "Takliflarni olish",
   "Заявки по пути и старые отправления":
     "Yo‘l-yo‘lakay buyurtmalar va eski jo‘natmalar",
   Самокат: "Samokat",
