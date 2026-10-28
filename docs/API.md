@@ -141,3 +141,7 @@ GET `admin` возвращает данные согласно роли. Опе�
 ## Грузовые услуги и спецтехника
 
 `mobility/quote`, `create`, `presence` поддерживают cargo/equipment и matchingMode; контракт и примеры параметров — [HEAVY-ORDERS.md](HEAVY-ORDERS.md). Старые запросы без режима остаются ручными предложениями, новые заказы получают Order v1.
+
+## Редактор тарифов
+
+`GET /api/admin/tariffs` и идемпотентный `POST /api/admin.tariff` доступны только admin. Формат правил, expectedVersion и поведение конфликтов: [TARIFF-ADMIN.md](TARIFF-ADMIN.md).

@@ -1,3 +1,4 @@
+import { updateTariff } from "./orders/tariff-admin";
 import {
   createDeliveryOrder,
   deliveryOrder,
@@ -474,6 +475,7 @@ async function execute(
     await audit(db, u, "recipient.claim", s.id);
     return { id: s.id };
   }
+  if (action === "admin.tariff") return updateTariff(db, u, b);
   if (action === "admin.settings") {
     requireRole(u, ["admin"]);
     const data = z

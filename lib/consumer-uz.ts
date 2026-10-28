@@ -1,4 +1,28 @@
 export const consumerUz: Record<string, string> = {
+  "Тарифы машин": "Mashina tariflari",
+  "Базовая стоимость, сум": "Boshlang‘ich narx, so‘m",
+  "За километр, сум": "Bir kilometr uchun, so‘m",
+  "За час, сум": "Bir soat uchun, so‘m",
+  "Минимальная цена, сум": "Eng kam narx, so‘m",
+  "Округление вверх, сум": "Yuqoriga yaxlitlash, so‘m",
+  "Максимальное расстояние, км": "Eng katta masofa, km",
+  "Причина изменения": "O‘zgartirish sababi",
+  "Сохранить новую версию": "Yangi versiyani saqlash",
+  "Сохранение…": "Saqlanmoqda…",
+  "Обновить список": "Ro‘yxatni yangilash",
+  "Предыдущие версии": "Oldingi versiyalar",
+  "Изменить тариф": "Tarifni o‘zgartirish",
+  Версия: "Versiya",
+  Эконом: "Ekonom",
+  "Тарифы не найдены": "Tariflar topilmadi",
+  "Новая версия тарифа сохранена. Цены существующих заказов не изменены.":
+    "Tarifning yangi versiyasi saqlandi. Mavjud buyurtmalar narxi o‘zgarmadi.",
+  "Изменения применяются к новым заказам. Уже рассчитанная цена проверяется повторно при подтверждении.":
+    "O‘zgarishlar yangi buyurtmalarga qo‘llanadi. Hisoblangan narx tasdiqlashda qayta tekshiriladi.",
+  "Тарифы доставки и зоны доступны в разделе «Тарифы и зоны».":
+    "Yetkazish tariflari va hududlar «Tariflar va hududlar» bo‘limida.",
+  "Тариф уже изменён. Обновите список перед сохранением.":
+    "Tarif allaqachon o‘zgartirilgan. Saqlashdan oldin ro‘yxatni yangilang.",
   "Закажите машину по рассчитанной цене или получите предложения для сложной работы.":
     "Hisoblangan narxda mashina buyurtma qiling yoki murakkab ish uchun takliflar oling.",
   "Выберите собственную активную машину подходящего типа":

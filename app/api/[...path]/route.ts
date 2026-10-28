@@ -1,3 +1,4 @@
+import { listTariffs } from "@/lib/orders/tariff-admin";
 import { orderStream } from "@/lib/orders/stream";
 import { courierInbox } from "@/lib/orders/delivery";
 import { smsMode, sendLoginCode } from "@/lib/sms";
@@ -400,6 +401,8 @@ async function handle(req: NextRequest, ctx: Context) {
         (await pool.query("SELECT data FROM routes WHERE user_id=$1", [u.id]))
           .rows[0]?.data ?? null,
       );
+    if (path[0] === "admin" && path[1] === "tariffs" && !post)
+      return json(await listTariffs(u));
     if (endpoint === "admin" && !post) return json(await adminData(u));
     if (path[0] === "admin" && path[1] === "files" && path[2] && !post) {
       requireRole(u, ["admin", "support"]);

@@ -15,6 +15,7 @@ const QuickBooking = dynamic(() => import("./quick-booking"), {
   ),
 });
 import type { Place } from "@/lib/places";
+import AdminTariffs from "./admin-tariffs";
 import TaxiAvailability from "./taxi-availability";
 import { serviceLabels, type ServiceKind } from "@/lib/mobility-catalog";
 type Any = Record<string, any>;
@@ -3022,6 +3023,7 @@ function Admin({ t, user, run }: Any) {
     "reports",
     "audit",
     "settings",
+    "tariffs",
   ];
   const labels: Any = {
     point_requests: "Операции пункта",
@@ -3035,6 +3037,7 @@ function Admin({ t, user, run }: Any) {
     reports: "Жалобы",
     audit: "Аудит",
     settings: "Тарифы и зоны",
+    tariffs: "Тарифы машин",
   };
   return (
     <>
@@ -3098,7 +3101,9 @@ function Admin({ t, user, run }: Any) {
       </div>
       <section className="card detail-card">
         <h2>{t(labels[view])}</h2>
-        {view === "settings" ? (
+        {view === "tariffs" && user.role === "admin" ? (
+          <AdminTariffs api={api} t={t} />
+        ) : view === "settings" ? (
           <form
             onSubmit={(e) => {
               e.preventDefault();
