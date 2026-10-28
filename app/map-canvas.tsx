@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Place } from "@/lib/places";
 export default function MapCanvas({
   focus,
+  executor = null,
   origin,
   destination,
   selecting,
@@ -11,6 +12,7 @@ export default function MapCanvas({
   t = (text: string) => text,
 }: {
   focus: { lat: number; lng: number };
+  executor?: { lat: number; lng: number; updated_at: string } | null;
   origin: Place | null;
   destination: Place | null;
   selecting: boolean;
@@ -134,6 +136,26 @@ export default function MapCanvas({
     selecting,
     bottomInset,
   ]);
+  useEffect(() => {
+    let active = true;
+    let marker: import("leaflet").Marker | undefined;
+    void import("leaflet").then((L) => {
+      if (!active || !map.current || !executor || selecting) return;
+      marker = L.marker([executor.lat, executor.lng], {
+        icon: L.divIcon({
+          className: "executor-dot",
+          html: "<span>➤</span>",
+          iconSize: [38, 38],
+          iconAnchor: [19, 19],
+        }),
+      }).addTo(map.current);
+      marker.bindTooltip(t("Исполнитель"));
+    });
+    return () => {
+      active = false;
+      marker?.remove();
+    };
+  }, [executor?.lat, executor?.lng, executor?.updated_at, selecting]);
   return (
     <div className="booking-map-wrap">
       <div

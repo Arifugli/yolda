@@ -374,7 +374,7 @@ test("RLS закрывает таблицы даже при случайном S
     await db.query(`CREATE ROLE ${role}`);
     await db.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
     await db.query(
-      `GRANT SELECT ON users,orders,service_requests,order_events,order_tariffs,sessions TO ${role}`,
+      `GRANT SELECT ON users,orders,service_requests,order_events,order_tariffs,executor_presence,order_dispatches,taxi_presence,taxi_dispatches,sessions TO ${role}`,
     );
     await db.query(`SET LOCAL ROLE ${role}`);
     for (const table of [
@@ -383,6 +383,10 @@ test("RLS закрывает таблицы даже при случайном S
       "service_requests",
       "order_events",
       "order_tariffs",
+      "executor_presence",
+      "order_dispatches",
+      "taxi_presence",
+      "taxi_dispatches",
       "sessions",
     ])
       assert.equal((await db.query(`SELECT * FROM ${table}`)).rowCount, 0);

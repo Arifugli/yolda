@@ -1,3 +1,5 @@
+import { orderStream } from "@/lib/orders/stream";
+import { courierInbox } from "@/lib/orders/delivery";
 import { smsMode, sendLoginCode } from "@/lib/sms";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -220,9 +222,43 @@ async function handle(req: NextRequest, ctx: Context) {
       req.cookies.get("yolda_session")?.value ?? null,
     );
     if (post) await rate("write:" + u.id, 120, 60);
+    if (
+      !post &&
+      path.length === 3 &&
+      path[0] === "orders" &&
+      path[2] === "events"
+    ) {
+      await rate("order-stream:" + u.id, 30, 60);
+      return await orderStream(
+        z.uuid().parse(path[1]),
+        req.cookies.get("yolda_session")!.value,
+        req.signal,
+      );
+    }
     if (endpoint === "places" && !post) {
       await rate("places:" + u.id, 30, 60);
       return json(await geocode(req.nextUrl.searchParams));
+    }
+    if (path[0] === "delivery") {
+      if (!post && endpoint === "delivery/presence")
+        return json(await transaction((db) => courierInbox(db, u)));
+      const action =
+        path.length === 2 && path[1] === "presence"
+          ? "presence"
+          : path.length === 3 &&
+              ["dispatch", "accept", "reject"].includes(path[2])
+            ? path[2]
+            : null;
+      if (!post || !action) throw new AppError(404, "Не найдено");
+      return json(
+        await mutate(
+          u,
+          "delivery." + action,
+          path.length === 3 ? path[1] : undefined,
+          body(),
+          req.headers.get("idempotency-key") ?? "",
+        ),
+      );
     }
     if (path[0] === "mobility") {
       if (!post) {

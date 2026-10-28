@@ -152,7 +152,11 @@ test("Доставка с карты оформляется одним нажа�
       permissions: ["geolocation"],
       geolocation: { latitude: 40.386, longitude: 71.786, accuracy: 10 },
     }),
-    b = await browser.newContext(),
+    b = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      permissions: ["geolocation"],
+      geolocation: { latitude: 40.386, longitude: 71.787, accuracy: 10 },
+    }),
     c = await browser.newContext();
   await locations(a);
   const sender = await a.newPage(),
@@ -199,20 +203,33 @@ test("Доставка с карты оформляется одним нажа�
         [prefix + "-delivery"],
       )
     ).rows[0].id;
-    await post(b, `shipments/${id}/offer`, {});
     await courier
-      .getByRole("button", { name: /^Мои доставки/ })
+      .getByRole("button", { name: "Исполнителям", exact: true })
       .first()
       .click();
-    await courier.getByRole("button", { name: /Доставляю/ }).click();
+    const panel = courier.locator(".courier-availability");
+    await panel.locator("summary").click();
+    await panel.getByRole("checkbox").check();
+    await panel
+      .getByRole("button", { name: "Выйти на линию", exact: true })
+      .click();
+    await expect(
+      panel.getByRole("button", { name: "Принять доставку", exact: true }),
+    ).toBeVisible({ timeout: 20000 });
+    expect(
+      await courier.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBeTruthy();
+    await courier.screenshot({
+      path: "artifacts/courier-incoming-mobile.png",
+      fullPage: true,
+    });
+    await panel
+      .getByRole("button", { name: "Принять доставку", exact: true })
+      .click({ timeout: 20000 });
     await courier
-      .getByRole("button")
-      .filter({
-        has: courier.getByRole("heading", {
-          name: prefix + "-delivery",
-          exact: true,
-        }),
-      })
+      .getByRole("button", { name: "Еду за посылкой", exact: true })
       .click();
     await courier
       .getByRole("button", { name: "Прибыл на забор", exact: true })

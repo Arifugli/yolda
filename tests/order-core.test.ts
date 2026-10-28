@@ -33,7 +33,7 @@ test("Order: canonical journey, retries handled at command boundary, terminal st
   assert.equal(canonicalState("driver_pending"), "offered");
   assert.deepEqual(transitions.completed, []);
   assert.ok(verticals.ride);
-  assert.equal(verticals.delivery, undefined);
+  assert.ok(verticals.delivery);
 });
 test("Pricing: configurable minimum, rounding, route validation and different tariff rules", () => {
   const route = {

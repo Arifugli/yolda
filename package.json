@@ -9,14 +9,15 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
     "db:seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
-    "test": "tsx --env-file-if-exists=.env --test tests/*.test.ts",
+    "test": "tsx --env-file-if-exists=.env --test --test-concurrency=1 tests/*.test.ts",
     "storage:prepare": "tsx --env-file-if-exists=.env scripts/storage.ts",
     "supabase:check": "tsx --env-file-if-exists=.env scripts/supabase-check.ts",
     "supabase:preflight": "tsx --env-file-if-exists=.env scripts/supabase-preflight.ts",
     "supabase:sql": "tsx scripts/supabase-sql.ts",
     "storage:dev": "tsx --env-file-if-exists=.env scripts/object-store.ts",
     "test:e2e": "playwright test",
-    "cloud:compose": "tsx scripts/cloud-compose.ts"
+    "cloud:compose": "tsx scripts/cloud-compose.ts",
+    "dispatch:worker": "tsx --env-file-if-exists=.env scripts/dispatch-worker.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1149.0",

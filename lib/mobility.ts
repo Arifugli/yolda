@@ -1,3 +1,5 @@
+import { executorBusy } from "./orders/matching";
+import { executorPosition } from "./orders/delivery";
 import { verticals } from "./orders/verticals";
 import { changeOrderState, initializeOrder } from "./orders/core";
 import { quoteRide } from "./orders/pricing";
@@ -167,6 +169,11 @@ export async function mobilityMutate(
     ])
   ).rows[0];
   allow(!!s, "Заявка не найдена", 404);
+  allow(
+    s.kind !== "delivery",
+    "Заказ доставки доступен через API доставки",
+    404,
+  );
   const customer = u.id === s.customer_id,
     provider = u.id === s.provider_id;
   if (action === "dispatch") return dispatchTaxi(db, u, s);
@@ -234,12 +241,7 @@ export async function mobilityMutate(
       "mobility-provider:" + b.providerId,
     ]);
     allow(
-      !(
-        await db.query(
-          "SELECT 1 FROM service_requests WHERE provider_id=$1 AND status NOT IN ('completed','cancelled')",
-          [b.providerId],
-        )
-      ).rowCount,
+      !(await executorBusy(db, b.providerId)),
       "Исполнитель уже занят",
       409,
     );
@@ -541,7 +543,7 @@ export async function mobilityPresence(u: User) {
   ).rows[0];
   const incoming = (
     await pool.query(
-      "SELECT r.*,d.expires_at FROM service_requests r JOIN taxi_dispatches d ON d.request_id=r.id AND d.provider_id=$1 AND d.status='pending' AND d.expires_at>now() WHERE r.provider_id=$1 AND r.status='driver_pending'",
+      "SELECT r.*,d.expires_at FROM service_requests r JOIN taxi_dispatches d ON d.request_id=r.id AND d.provider_id=$1 AND d.status='pending' AND d.expires_at>now() WHERE r.kind='taxi' AND r.provider_id=$1 AND r.status='driver_pending'",
       [u.id],
     )
   ).rows;
@@ -554,6 +556,11 @@ export async function mobilityDetail(u: User, id: string) {
     ])
   ).rows[0];
   allow(!!s, "Заявка не найдена", 404);
+  allow(
+    s.kind !== "delivery",
+    "Заказ доставки доступен через API доставки",
+    404,
+  );
   if (!member(u, s) && !staff(u)) {
     stage(s, "published");
     return {
@@ -602,5 +609,22 @@ export async function mobilityDetail(u: User, id: string) {
       [[s.customer_id, s.provider_id].filter(Boolean)],
     )
   ).rows;
-  return { ...s, offers, messages, events, reviews, participants };
+  return {
+    ...s,
+    offers,
+    messages,
+    events,
+    reviews,
+    participants,
+    executorPosition: s.provider_id
+      ? await executorPosition(
+          pool,
+          s.provider_id,
+          "ride",
+          !["published", "driver_pending", "completed", "cancelled"].includes(
+            s.status,
+          ),
+        )
+      : null,
+  };
 }

@@ -4,7 +4,7 @@ BEGIN;
 SELECT pg_advisory_xact_lock(981734);
 DO $preflight$
 BEGIN
-  IF EXISTS(SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=ANY(ARRAY['users','sessions','otp','identity_verifications','shipments','parcels','locations','delivery_legs','courier_offers','assignments','handover_codes','handovers','tracking_events','payments','refunds','payouts','reviews','disputes','conversations','messages','lockers','compartments','reservations','device_events','notifications','audit_logs','idempotency','files','reports','settings','schema_migrations','rate_limits','routes','point_requests','service_vehicles','service_requests','service_offers','service_start_codes','service_events','service_messages','service_reviews','taxi_presence','taxi_dispatches','orders','order_events','order_tariffs'])) THEN
+  IF EXISTS(SELECT 1 FROM pg_tables WHERE schemaname='public' AND tablename=ANY(ARRAY['users','sessions','otp','identity_verifications','shipments','parcels','locations','delivery_legs','courier_offers','assignments','handover_codes','handovers','tracking_events','payments','refunds','payouts','reviews','disputes','conversations','messages','lockers','compartments','reservations','device_events','notifications','audit_logs','idempotency','files','reports','settings','schema_migrations','rate_limits','routes','point_requests','service_vehicles','service_requests','service_offers','service_start_codes','service_events','service_messages','service_reviews','taxi_presence','taxi_dispatches','orders','order_events','order_tariffs','executor_presence','order_dispatches'])) THEN
     IF to_regclass('public.users') IS NULL OR to_regclass('public.schema_migrations') IS NULL THEN
       RAISE EXCEPTION 'Colliding public tables: use a separate Supabase project';
     END IF;
@@ -286,6 +286,39 @@ ALTER TABLE otp ADD COLUMN provider text NOT NULL DEFAULT 'demo';
 
 $migration011_sql$;
     INSERT INTO schema_migrations(name) VALUES('011.sql');
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM schema_migrations WHERE name='012.sql') THEN
+    EXECUTE $migration012_sql$
+ALTER TABLE orders DROP CONSTRAINT service_requests_kind_check;
+ALTER TABLE orders ADD CONSTRAINT orders_kind_check CHECK(kind IN ('taxi','cargo','equipment','delivery'));
+-- Delivery couriers need no registered taxi vehicle.
+ALTER TABLE orders DROP CONSTRAINT service_requests_check1;
+ALTER TABLE orders ADD CONSTRAINT orders_assignment_check CHECK(
+ (provider_id IS NULL AND vehicle_id IS NULL AND agreed_price IS NULL) OR
+ (provider_id IS NOT NULL AND agreed_price IS NOT NULL AND (vehicle_id IS NOT NULL OR kind='delivery'))
+);
+ALTER TABLE orders ADD COLUMN shipment_id uuid UNIQUE REFERENCES shipments ON DELETE CASCADE;
+ALTER TABLE taxi_presence RENAME TO executor_presence;
+ALTER TABLE executor_presence DROP CONSTRAINT taxi_presence_pkey;
+ALTER TABLE executor_presence ALTER COLUMN vehicle_id DROP NOT NULL;
+ALTER TABLE executor_presence ADD COLUMN service_type text NOT NULL DEFAULT 'ride' CHECK(service_type IN ('ride','delivery'));
+ALTER TABLE executor_presence ADD COLUMN transport text NOT NULL DEFAULT 'car' CHECK(transport IN ('walk','bike','scooter','car'));
+ALTER TABLE executor_presence ADD PRIMARY KEY(user_id,service_type);
+CREATE VIEW taxi_presence WITH(security_invoker=true) AS SELECT user_id,vehicle_id,lat,lng,accuracy,updated_at FROM executor_presence WHERE service_type='ride';
+ALTER TABLE taxi_dispatches RENAME TO order_dispatches;
+ALTER TABLE order_dispatches ALTER COLUMN vehicle_id DROP NOT NULL;
+CREATE VIEW taxi_dispatches WITH(security_invoker=true) AS SELECT * FROM order_dispatches;
+REVOKE ALL ON executor_presence,taxi_presence,order_dispatches,taxi_dispatches FROM PUBLIC;
+DO $$ DECLARE r text; BEGIN
+ FOREACH r IN ARRAY ARRAY['anon','authenticated'] LOOP
+  IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname=r) THEN
+   EXECUTE format('REVOKE ALL ON executor_presence,taxi_presence,order_dispatches,taxi_dispatches FROM %I',r);
+  END IF;
+ END LOOP;
+END $$;
+
+$migration012_sql$;
+    INSERT INTO schema_migrations(name) VALUES('012.sql');
   END IF;
 END $bootstrap$;
 COMMIT;

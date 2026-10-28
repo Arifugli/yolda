@@ -1,30 +1,8 @@
-import { distanceKm } from "./distance";
 export { distanceKm } from "./distance";
-import { changeOrderState } from "./orders/core";
+import { dispatchOrder, respondOrder, matchingEvent } from "./orders/matching";
 import { z } from "zod";
 import type { PoolClient } from "pg";
 import { AppError, verified, type User } from "./auth";
-const coordinate = z.object({
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-});
-async function event(
-  db: PoolClient,
-  u: User,
-  s: any,
-  status: string,
-  detail: string,
-) {
-  await changeOrderState(db, u, s, status, detail);
-  await db.query(
-    "INSERT INTO service_events(request_id,actor_id,status,detail) VALUES($1,$2,$3,$4)",
-    [s.id, u.id, status, detail],
-  );
-  await db.query(
-    "INSERT INTO audit_logs(actor_id,action,entity_id,detail) VALUES($1,'taxi.dispatch',$2,$3)",
-    [u.id, s.id, JSON.stringify({ status, detail })],
-  );
-}
 export async function taxiPresence(db: PoolClient, u: User, body: unknown) {
   const b = z
     .discriminatedUnion("online", [
@@ -40,7 +18,10 @@ export async function taxiPresence(db: PoolClient, u: User, body: unknown) {
     ])
     .parse(body);
   if (!b.online) {
-    await db.query("DELETE FROM taxi_presence WHERE user_id=$1", [u.id]);
+    await db.query(
+      "DELETE FROM executor_presence WHERE user_id=$1 AND service_type='ride'",
+      [u.id],
+    );
     return { online: false };
   }
   await verified(db, u);
@@ -56,7 +37,7 @@ export async function taxiPresence(db: PoolClient, u: User, body: unknown) {
       "Для такси нужна собственная активная легковая машина или минивэн",
     );
   await db.query(
-    "INSERT INTO taxi_presence(user_id,vehicle_id,lat,lng,accuracy,updated_at) VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(user_id) DO UPDATE SET vehicle_id=$2,lat=$3,lng=$4,accuracy=$5,updated_at=now()",
+    "INSERT INTO executor_presence(user_id,vehicle_id,lat,lng,accuracy,updated_at) VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(user_id,service_type) DO UPDATE SET vehicle_id=$2,lat=$3,lng=$4,accuracy=$5,updated_at=now()",
     [u.id, b.vehicleId, b.lat, b.lng, b.accuracy],
   );
   return { online: true, expiresIn: 120 };
@@ -75,107 +56,16 @@ export async function dispatchTaxi(db: PoolClient, u: User, s: any) {
       searchStartsAt: new Date(at - 20 * 60000).toISOString(),
     };
   if (at < Date.now() - 3600000) {
-    await event(db, u, s, "cancelled", "Поиск истёк; создайте новую поездку");
-    return { id: s.id, status: s.status };
-  }
-  if (s.status === "driver_pending") {
-    const pending = (
-      await db.query(
-        "SELECT * FROM taxi_dispatches WHERE request_id=$1 AND status='pending' FOR UPDATE",
-        [s.id],
-      )
-    ).rows[0];
-    if (pending && new Date(pending.expires_at).getTime() > Date.now())
-      return { id: s.id, status: s.status };
-    await db.query(
-      "UPDATE taxi_dispatches SET status='expired' WHERE request_id=$1 AND status='pending'",
-      [s.id],
-    );
-    await db.query(
-      "UPDATE service_requests SET provider_id=NULL,vehicle_id=NULL,agreed_price=NULL WHERE id=$1",
-      [s.id],
-    );
-    await event(db, u, s, "published", "Водитель не ответил; поиск продолжен");
-  }
-  const origin = coordinate.parse(s.data.origin);
-  const nearby = (
-    await db.query(
-      `SELECT p.user_id,p.lat,p.lng FROM taxi_presence p JOIN service_vehicles v ON v.id=p.vehicle_id JOIN users u ON u.id=p.user_id
-    WHERE p.updated_at>now()-interval '120 seconds' AND p.user_id<>$1 AND v.active AND v.kind=$2
-    AND (v.data->>'seats')::int >= $3 AND u.identity='verified' AND NOT u.restricted
-    AND NOT EXISTS(SELECT 1 FROM taxi_dispatches d WHERE d.request_id=$4 AND d.provider_id=p.user_id)
-    AND NOT EXISTS(SELECT 1 FROM service_requests r WHERE r.provider_id=p.user_id AND r.status NOT IN ('completed','cancelled'))`,
-      [u.id, s.data.vehicleKind, s.data.passengers, s.id],
-    )
-  ).rows
-    .map((p) => ({
-      ...p,
-      distance: distanceKm(origin, { lat: p.lat, lng: p.lng }),
-    }))
-    .filter((p) => p.distance <= 8)
-    .sort((a, b) => a.distance - b.distance);
-  for (const candidate of nearby) {
-    const p = (
-      await db.query(
-        "SELECT * FROM taxi_presence WHERE user_id=$1 AND updated_at>now()-interval '120 seconds' FOR UPDATE SKIP LOCKED",
-        [candidate.user_id],
-      )
-    ).rows[0];
-    if (!p) continue;
-    if (
-      !(
-        await db.query(
-          "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",
-          ["mobility-provider:" + p.user_id],
-        )
-      ).rows[0].locked
-    )
-      continue;
-    if (
-      (
-        await db.query(
-          "SELECT 1 FROM service_requests WHERE provider_id=$1 AND status NOT IN ('completed','cancelled')",
-          [p.user_id],
-        )
-      ).rowCount
-    )
-      continue;
-    const v = (
-      await db.query(
-        "SELECT * FROM service_vehicles WHERE id=$1 AND owner_id=$2 AND active FOR SHARE",
-        [p.vehicle_id, p.user_id],
-      )
-    ).rows[0];
-    if (!v || v.kind !== s.data.vehicleKind || v.data.seats < s.data.passengers)
-      continue;
-    const driver = (
-      await db.query("SELECT * FROM users WHERE id=$1", [p.user_id])
-    ).rows[0];
-    try {
-      await verified(db, driver);
-    } catch (e) {
-      if (e instanceof AppError) continue;
-      throw e;
-    }
-    if (distanceKm(origin, { lat: p.lat, lng: p.lng }) > 8) continue;
-    await db.query(
-      "INSERT INTO taxi_dispatches(request_id,provider_id,vehicle_id,status,expires_at) VALUES($1,$2,$3,'pending',now()+interval '45 seconds')",
-      [s.id, p.user_id, v.id],
-    );
-    await db.query(
-      "UPDATE service_requests SET provider_id=$2,vehicle_id=$3,agreed_price=$4 WHERE id=$1",
-      [s.id, p.user_id, v.id, s.data.budget],
-    );
-    await event(
+    await matchingEvent(
       db,
       u,
       s,
-      "driver_pending",
-      "Ближайшему доступному водителю предложена поездка",
+      "cancelled",
+      "Поиск истёк; создайте новую поездку",
     );
     return { id: s.id, status: s.status };
   }
-  return { id: s.id, status: s.status, noDriver: true };
+  return dispatchOrder(db, u, s);
 }
 export async function taxiResponse(
   db: PoolClient,
@@ -183,47 +73,8 @@ export async function taxiResponse(
   s: any,
   accept: boolean,
 ) {
-  if (
-    s.kind !== "taxi" ||
-    s.provider_id !== u.id ||
-    s.status !== "driver_pending"
-  )
-    throw new AppError(409, "Предложение больше недоступно");
-  const pending = (
-    await db.query(
-      "SELECT * FROM taxi_dispatches WHERE request_id=$1 AND provider_id=$2 AND status='pending' FOR UPDATE",
-      [s.id, u.id],
-    )
-  ).rows[0];
-  if (!pending || new Date(pending.expires_at).getTime() <= Date.now())
-    throw new AppError(409, "Время ответа истекло");
-  if (accept) {
-    await verified(db, u);
-    const v = (
-      await db.query(
-        "SELECT * FROM service_vehicles WHERE id=$1 AND active FOR SHARE",
-        [s.vehicle_id],
-      )
-    ).rows[0];
-    if (!v || v.kind !== s.data.vehicleKind || v.data.seats < s.data.passengers)
-      throw new AppError(409, "Машина больше не подходит");
-    await db.query(
-      "UPDATE taxi_dispatches SET status='accepted' WHERE request_id=$1 AND provider_id=$2",
-      [s.id, u.id],
-    );
-    await event(db, u, s, "assigned", "Водитель принял поездку");
-  } else {
-    await db.query(
-      "UPDATE taxi_dispatches SET status='rejected' WHERE request_id=$1 AND provider_id=$2",
-      [s.id, u.id],
-    );
-    await db.query(
-      "UPDATE service_requests SET provider_id=NULL,vehicle_id=NULL,agreed_price=NULL WHERE id=$1",
-      [s.id],
-    );
-    await event(db, u, s, "published", "Водитель отказался; поиск продолжен");
-  }
-  return { id: s.id, status: s.status };
+  if (s.kind !== "taxi") throw new AppError(403, "Неверная услуга");
+  return respondOrder(db, u, s, accept);
 }
 export async function dispatchWaitingTaxis(db: PoolClient) {
   // Driver heartbeats also advance waiting requests when the passenger leaves the screen.

@@ -28,6 +28,10 @@ services:
         value: "true"
       - key: DB_POOL_MAX
         value: "5"
+      - key: DELIVERY_CORE_ENABLED
+        value: "true"
+      - key: DISPATCH_WORKER_ENABLED
+        value: "true"
       - key: DEMO_ACCESS_USER
         value: demo
       - key: DEMO_ACCESS_PASSWORD

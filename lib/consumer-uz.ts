@@ -1,4 +1,19 @@
 export const consumerUz: Record<string, string> = {
+  "Заявки по пути и старые отправления":
+    "Yo‘l-yo‘lakay buyurtmalar va eski jo‘natmalar",
+  Самокат: "Samokat",
+  "Я курьер": "Men kuryerman",
+  "Включите приём заказов в профиле. Геопозиция передаётся только пока приложение открыто; без обновления курьер исключается из поиска через две минуты.":
+    "Profilda buyurtma qabul qilishni yoqing. Joylashuv faqat ilova ochiq paytda yuboriladi; yangilanmasa kuryer ikki daqiqadan so‘ng qidiruvdan chiqariladi.",
+  "Разрешаю передавать текущую геопозицию для подбора доставок, пока я на линии.":
+    "Onlayn paytimda yetkazishlarni tanlash uchun joylashuvimni yuborishga roziman.",
+  "Новая доставка": "Yangi yetkazish",
+  "Осталось секунд": "Qolgan soniyalar",
+  "Принять доставку": "Yetkazishni qabul qilish",
+  "Отклонить доставку": "Yetkazishni rad etish",
+  "Еду за посылкой": "Jo‘natmani olishga ketyapman",
+  "Курьер подтверждает доставку": "Kuryer yetkazishni tasdiqlayapti",
+  Исполнитель: "Ijrochi",
   "Вход по телефону": "Telefon orqali kirish",
   "Введите код из SMS": "SMS kodini kiriting",
   "Еду к заказчику": "Buyurtmachi tomon yo‘lga chiqdim",

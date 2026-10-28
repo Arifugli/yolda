@@ -1,3 +1,12 @@
+import {
+  createDeliveryOrder,
+  deliveryOrder,
+  syncDeliveryState,
+  courierPresence,
+  executorPosition,
+} from "./orders/delivery";
+import { dispatchOrder, respondOrder, lockExecutor } from "./orders/matching";
+import { changeOrderState } from "./orders/core";
 import { codeDigest } from "./secure-cache";
 import { encryptResponse, decryptResponse, canonical } from "./secure-cache";
 import type { PoolClient } from "pg";
@@ -100,6 +109,7 @@ async function transition(
   custodian = s.custodian_id,
   location = s.location,
 ) {
+  await syncDeliveryState(db, u, s, next, detail);
   await db.query(
     "UPDATE shipments SET status=$2,custodian_id=$3,location=$4 WHERE id=$1",
     [s.id, next, custodian, location],
@@ -191,17 +201,44 @@ async function execute(
 ): Promise<any> {
   if (action.startsWith("mobility."))
     return mobilityMutate(db, u, action.slice("mobility.".length), id, b);
+  if (action === "delivery.presence") return courierPresence(db, u, b);
+  if (
+    ["delivery.dispatch", "delivery.accept", "delivery.reject"].includes(action)
+  ) {
+    const s = await shipment(db, z.uuid().parse(id));
+    const order = await deliveryOrder(db, s.id);
+    if (!order) throw new AppError(404, "Заказ не найден");
+    if (action === "delivery.dispatch") {
+      owner(u, s);
+      return dispatchOrder(db, u, order);
+    }
+    const accept = action === "delivery.accept";
+    await respondOrder(db, u, order, accept);
+    if (accept) {
+      await db.query(
+        "INSERT INTO courier_offers VALUES($1,$2) ON CONFLICT DO NOTHING",
+        [s.id, u.id],
+      );
+      const sender = (
+        await db.query("SELECT * FROM users WHERE id=$1", [s.sender_id])
+      ).rows[0];
+      await execute(db, sender, "assign", s.id, { courierId: u.id });
+    }
+    return { ok: true, id: s.id };
+  }
   if (action === "delivery.quote")
     return deliveryQuote(
       b,
-      (await db.query("SELECT data FROM settings WHERE id=1")).rows[0].data,
+      (await db.query("SELECT data FROM settings WHERE id=1 FOR SHARE")).rows[0]
+        .data,
     );
   if (action === "delivery.book") {
     await verified(db, u);
     const input = deliveryBookingSchema.parse(b),
       quote = deliveryQuote(
         input,
-        (await db.query("SELECT data FROM settings WHERE id=1")).rows[0].data,
+        (await db.query("SELECT data FROM settings WHERE id=1 FOR SHARE"))
+          .rows[0].data,
       );
     if (input.quotedPrice !== quote.price)
       throw new AppError(
@@ -232,6 +269,8 @@ async function execute(
     );
     await execute(db, u, "pay", created.id, {});
     await execute(db, u, "publish", created.id, {});
+    if (process.env.DELIVERY_CORE_ENABLED !== "false")
+      await createDeliveryOrder(db, u, await shipment(db, created.id), quote);
     return { ...created, status: "published", price: quote.price };
   }
   if (action === "verify") {
@@ -250,7 +289,7 @@ async function execute(
   if (action === "profile") {
     const p = z
       .object({
-        transport: z.enum(["walk", "bike", "car"]),
+        transport: z.enum(["walk", "bike", "scooter", "car"]),
         city: z.string(),
         accepting: z.boolean(),
         language: z.enum(["ru", "uz"]),
@@ -279,8 +318,9 @@ async function execute(
   }
   if (action === "create") {
     const input = shipmentSchema.parse(b);
-    const settings = (await db.query("SELECT data FROM settings WHERE id=1"))
-      .rows[0].data;
+    const settings = (
+      await db.query("SELECT data FROM settings WHERE id=1 FOR SHARE")
+    ).rows[0].data;
     if (
       !settings.cities.includes(input.origin.city) ||
       !settings.cities.includes(input.destination.city)
@@ -495,6 +535,11 @@ async function execute(
   if (!id) throw new AppError(400, "Нужен заказ");
   const s = await shipment(db, id);
   if (action === "offer") {
+    if (await deliveryOrder(db, s.id))
+      throw new AppError(
+        409,
+        "Доставка назначается автоматически. Выйдите на линию курьера.",
+      );
     await verified(db, u);
     status(s, "published");
     if (
@@ -536,6 +581,11 @@ async function execute(
     )
       throw new AppError(409, "Требуются получатель, согласие и оплата");
     const target = z.uuid().parse(b.courierId);
+    const core = await deliveryOrder(db, s.id);
+    if (core && (core.status !== "assigned" || core.provider_id !== target))
+      throw new AppError(409, "Сначала исполнитель должен принять предложение");
+    if (!(await lockExecutor(db, target, s.id, !!core)))
+      throw new AppError(409, "Исполнитель уже занят");
     if (target === s.sender_id || target === s.recipient_id)
       throw new AppError(403, "Нельзя назначить участника курьером");
     const offer = await db.query(
@@ -633,6 +683,22 @@ async function execute(
       );
     await audit(db, u, "demo.pay", s.id);
     return paid;
+  }
+  if (action === "depart") {
+    courier(u, s);
+    status(s, "assigned");
+    const core = await deliveryOrder(db, s.id);
+    if (!core)
+      throw new AppError(409, "Для этого заказа отдельный выезд не требуется");
+    await changeOrderState(
+      db,
+      u,
+      core,
+      "en_route_to_pickup",
+      "Курьер выехал за посылкой",
+    );
+    await event(db, u, s, "Курьер выехал за посылкой");
+    return { ok: true };
   }
   if (action === "arrive") {
     courier(u, s);
@@ -1380,8 +1446,14 @@ export async function getShipment(u: User, id: string) {
     const active = !["completed", "returned", "cancelled"].includes(s.status);
     if (!active) delete s.data.lastLocation;
     const query = async (sql: string) => (await db.query(sql, [id])).rows;
+    const core = await deliveryOrder(db, s.id);
     return {
       ...s,
+      orderState: core?.state ?? null,
+      orderEngine: core?.engine_version ?? 0,
+      executorPosition: s.courier_id
+        ? await executorPosition(db, s.courier_id, "delivery", active)
+        : null,
       events: await query(
         "SELECT e.*,u.name FROM tracking_events e LEFT JOIN users u ON u.id=e.actor_id WHERE shipment_id=$1 ORDER BY e.id",
       ),
@@ -1432,7 +1504,7 @@ export async function nearby(u: User, params: URLSearchParams) {
   );
   const rows = (
     await pool.query(
-      "SELECT id,sender_id,recipient_id,data,created_at FROM shipments WHERE status='published' AND sender_id<>$1 AND (recipient_id IS NULL OR recipient_id<>$1) AND data->'origin'->>'city'=$2",
+      "SELECT id,sender_id,recipient_id,data,created_at FROM shipments WHERE status='published' AND NOT EXISTS(SELECT 1 FROM orders o WHERE o.shipment_id=shipments.id) AND sender_id<>$1 AND (recipient_id IS NULL OR recipient_id<>$1) AND data->'origin'->>'city'=$2",
       [u.id, city],
     )
   ).rows;

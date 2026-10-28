@@ -1,4 +1,5 @@
 "use client";
+import CourierAvailability from "./courier-availability";
 import { useEffect, useState, type FormEvent } from "react";
 import { uz, statusLabels } from "@/lib/i18n";
 import Mobility from "./mobility";
@@ -505,6 +506,11 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <div
+                className={workKind === "delivery" ? "" : "driver-panel-hidden"}
+              >
+                <CourierAvailability user={user} api={api} t={t} open={open} />
+              </div>
               <div className={workKind === "taxi" ? "" : "driver-panel-hidden"}>
                 <TaxiAvailability
                   api={api}
@@ -568,12 +574,17 @@ export default function App() {
               )}
               {tab === "work" &&
                 (workKind === "delivery" ? (
-                  <Nearby
-                    t={t}
-                    user={user}
-                    run={run}
-                    goProfile={() => setTab("profile")}
-                  />
+                  <details className="card legacy-delivery">
+                    <summary>
+                      {t("Заявки по пути и старые отправления")}
+                    </summary>
+                    <Nearby
+                      t={t}
+                      user={user}
+                      run={run}
+                      goProfile={() => setTab("profile")}
+                    />
+                  </details>
                 ) : (
                   <Mobility
                     key={workKind + ":" + (serviceRequestId ?? "")}
@@ -2156,6 +2167,13 @@ function Detail({ t, user, initial: s, setSelected, act, busy, back }: Any) {
                 button("Оплатить (демо)", "pay")}
               {courier &&
                 s.status === "assigned" &&
+                s.orderEngine === 1 &&
+                s.orderState === "accepted" &&
+                button("Еду за посылкой", "depart")}
+              {courier &&
+                s.status === "assigned" &&
+                (s.orderEngine !== 1 ||
+                  s.orderState === "en_route_to_pickup") &&
                 button("Прибыл на забор", "arrive")}
               {courier &&
                 s.status === "picked_up" &&
@@ -2822,6 +2840,7 @@ function Profile({ t, user, me, lang, run, reload }: Any) {
                 {[
                   ["walk", "Пешком"],
                   ["bike", "Велосипед"],
+                  ["scooter", "Самокат"],
                   ["car", "Автомобиль"],
                 ].map(([v, l]) => (
                   <option key={v} value={v}>

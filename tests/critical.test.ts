@@ -1,3 +1,5 @@
+// This suite retains the legacy shipment/quick-booking contract; delivery-core.test.ts covers v1.
+process.env.DELIVERY_CORE_ENABLED = "false";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";

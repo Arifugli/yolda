@@ -1,3 +1,7 @@
+import {
+  deliveryBookingSchema,
+  deliveryRouteSchema,
+} from "../delivery-booking";
 import { z } from "zod";
 import { serviceRequestSchema } from "../mobility-schema";
 import { rideRoute } from "./pricing";
@@ -9,9 +13,16 @@ export interface Vertical {
   tariff: string;
   vehicleKinds: readonly string[];
 }
-// Delivery/freight/equipment stay behind their legacy adapters until P1.
+// Freight/equipment stay behind legacy adapters until their migration.
 // Register only implemented verticals; no simulated availability of future services.
 export const verticals: Partial<Record<ServiceType, Vertical>> = {
+  delivery: {
+    type: "delivery",
+    parameters: deliveryBookingSchema,
+    route: deliveryRouteSchema,
+    tariff: "parcel",
+    vehicleKinds: ["walk", "bike", "scooter", "car"],
+  },
   ride: {
     type: "ride",
     parameters: serviceRequestSchema.refine(

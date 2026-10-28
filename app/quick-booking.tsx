@@ -168,8 +168,10 @@ export default function QuickBooking({
   }, [id, origin, destination, parcel, kind, api]);
   useEffect(() => {
     if (!id) return;
-    let active = true;
+    let active = true,
+      requestVersion = 0;
     const load = async () => {
+      const currentRequest = ++requestVersion;
       try {
         let s = await api(endpoint + id);
         if (
@@ -180,19 +182,37 @@ export default function QuickBooking({
           await api(endpoint + id + "/dispatch", {});
           s = await api(endpoint + id);
         }
-        if (active) {
+        if (active && currentRequest === requestVersion) {
+          setError("");
           setOrder(s);
           setOrigin(s.data.origin);
           setDestination(s.data.destination);
         }
       } catch (e) {
-        if (active) setError((e as Error).message);
+        if (active && currentRequest === requestVersion)
+          setError((e as Error).message);
       }
     };
     void load();
-    const timer = setInterval(load, 4000);
+    let connected = false;
+    const events = new EventSource(`/api/orders/${id}/events`);
+    events.onmessage = () => {
+      connected = true;
+      void load();
+    };
+    events.onopen = () => {
+      connected = true;
+      void load();
+    };
+    events.onerror = () => {
+      connected = false;
+    };
+    const timer = setInterval(() => {
+      if (!connected) void load();
+    }, 4000);
     return () => {
       active = false;
+      events.close();
       clearInterval(timer);
     };
   }, [id, revision, kind, api]);
@@ -347,6 +367,7 @@ export default function QuickBooking({
     <div className="quick-booking" data-kind={kind}>
       <MapCanvas
         t={t}
+        executor={order?.executorPosition ?? null}
         focus={focus}
         origin={origin}
         destination={destination}
@@ -397,7 +418,15 @@ export default function QuickBooking({
                     {done ? "✓" : "↗"}
                   </span>
                   <div>
-                    <h1>{t(statusText[state] ?? "Загружаем заказ…")}</h1>
+                    <h1>
+                      {t(
+                        kind === "delivery" &&
+                          state === "published" &&
+                          order?.orderState === "offered"
+                          ? "Курьер подтверждает доставку"
+                          : (statusText[state] ?? "Загружаем заказ…"),
+                      )}
+                    </h1>
                     <p>
                       {provider?.name ??
                         t(
